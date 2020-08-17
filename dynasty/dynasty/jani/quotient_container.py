@@ -69,6 +69,26 @@ class JaniQuotientContainer:
     def jani_program(self):
         return self._jani_program
 
+    @property
+    def mdp_handling(self):
+        return self._mdp_handling
+
+    @property
+    def latest_result(self):
+        return self._latest_result
+
+    @property
+    def mc_time(self):
+        return self._mc_time
+
+    @property
+    def build_time(self):
+        return self._build_time
+
+    @property
+    def sched_ana_time(self):
+        return self._sched_ana_time
+
     def consider_subset(self, subset, indexed_suboptions):
         logger.debug("Consider sub-set of hole-options: {}".format(subset))
 

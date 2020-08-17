@@ -9,6 +9,7 @@ import dynasty.cegis.stats
 
 logger = logging.getLogger(__name__)
 
+
 class Verifier:
     def __init__(self):
         self.nr_checks = 0
@@ -22,11 +23,10 @@ class Verifier:
         self._opt_value = None
         self.sketch = None
 
-
     def initialise(self, sketch, properties, qualitative_properties, dont_care_set, add_cuts=True):
         self.properties = properties
         self.sketch = sketch
-        self.qualitative_properties  = qualitative_properties
+        self.qualitative_properties = qualitative_properties
         self._dont_care_set = dont_care_set
         self._set_cex_options(add_cuts)
 
@@ -40,6 +40,10 @@ class Verifier:
     def optimal_value(self):
         return self._opt_value
 
+    @property
+    def dont_care_set(self):
+        return self._dont_care_set
+
     def run(self, instance, all_conflicts, naive_deadlocks=True):
         """
         Run the verifier.
@@ -49,18 +53,20 @@ class Verifier:
         :param naive_deadlocks: 
         :return: 
         """
-        return self._naive_check(instance, all_conflicts, naive_deadlocks)
+        return self.naive_check(instance, all_conflicts, naive_deadlocks)
 
-    def _naive_check(self, instance, all_conflicts, naive_deadlocks=True, check_conflicts=False):
+    def naive_check(self, instance, all_conflicts, naive_deadlocks=True, check_conflicts=False):
         """
-        Check the concrete program for the given assignments.
 
-        :param assignments: 
-        :return: 
+        :param instance:
+        :param all_conflicts:
+        :param naive_deadlocks:
+        :param check_conflicts:
+        :return:
         """
         self.nr_checks += 1
         logger.debug("Build DTMC....")
-        model = self._build_model(instance)
+        model = self.build_model(instance)
         logger.debug("...done building DTMC (with {} states and {} transitions)".format(model.nr_states,
                                                                                         model.nr_transitions))
         # Analyse which properties hold.
@@ -77,7 +83,7 @@ class Verifier:
         # env.solver_environment.set_force_sound()
 
         # We can sometimes merge properties into a single meta-property for conflict analysis.
-        merged_conflict_props = self._merge_conflict_properties(quantitative_conflict_properties)
+        merged_conflict_props = self.merge_conflict_properties(quantitative_conflict_properties)
 
         conflicts = set()
         assert self._dont_care_set is not None
@@ -104,14 +110,15 @@ class Verifier:
             logger.debug("Found {} counterexamples.".format(len(result)))
 
             # Translate the counterexamples into conflicts.
-            analysed_conflicts = [self._conflict_analysis(conflict) for conflict in result]
+            analysed_conflicts = [self.conflict_analysis(conflict) for conflict in result]
             analysed_conflicts.sort()
             if check_conflicts:
                 # Checking conflicts if for debugging purposes only.
                 # We double check whether the counterexamples violate the properties.
                 for cex in result:
-                    test_model = self._build_model(instance.restrict_edges(cex), with_origins=False,
-                                                   register_stats=False)
+                    test_model = self.build_model(
+                        instance.restrict_edges(cex), with_origins=False, register_stats=False
+                    )
                     qualitative_conflicts_properties, quantitative_conflict_properties = self._naive_check_model(
                         test_model, all_conflicts)
                     assert len(quantitative_conflict_properties) > 0
@@ -126,12 +133,12 @@ class Verifier:
 
         return qualitative_conflicts_properties, conflicts
 
-    def _build_model(self, instance, with_origins=True, register_stats=True):
+    def build_model(self, instance, with_origins=True, register_stats=True):
         """
         Build a (sparse) model from the given prism program instance
 
-        :param instance: A highlevel description of the model
-        :param with_origins: If the model is to be analysed with highlevel counterex, then this flag should be true.
+        :param instance: A high-level description of the model
+        :param with_origins: If the model is to be analysed with high-level counter-ex, then this flag should be true.
         :param register_stats: Should the stats for this model be registered. 
             Put to False, when the model is just build for debugging purposes.
         :return: The Markov chain.
@@ -157,17 +164,17 @@ class Verifier:
             self.stats.report_model_building(building_time, model.nr_states)
         logger.debug("Build model with {} states in {} seconds".format(model.nr_states, building_time))
         assert len(model.initial_states) == 1
-        #logger.debug(instance)
+        # logger.debug(instance)
         return model
 
-    def _naive_check_model(self, model, check_all, terminate_after_qualitative_violation = True):
+    def _naive_check_model(self, model, check_all, terminate_after_qualitative_violation=True):
         """
         Do the model checking of the properties
 
         :param model: the Markov chain
         :param check_all: Should we abort as soon as we have found a conflicting property?
         :param terminate_after_qualitative_violation: Should we abort after a qualitative conflict?
-        :return: The set of qualitative conflict properties and the set of quantiative conflict properties
+        :return: The set of qualitative conflict properties and the set of quantitative conflict properties
         """
         logger.info("Start Model Checking....")
         start_mc = time.time()
@@ -220,7 +227,9 @@ class Verifier:
                 self._opt_value = mc_result
             else:
                 logger.debug("Optimal value ({}) not improved, conflict analysis!".format(self._opt_value))
-                violated.append(self._optimality.get_violation_property(self._opt_value, lambda x: self.sketch.expression_manager.create_rational(stormpy.Rational(x))))
+                violated.append(self._optimality.get_violation_property(
+                    self._opt_value, lambda x: self.sketch.expression_manager.create_rational(stormpy.Rational(x)))
+                )
         logger.info("Stop Model Checking")
         logger.debug(violated)
         return qualitative_violation, violated
@@ -228,10 +237,9 @@ class Verifier:
     def is_jani(self):
         return type(self.sketch) == stormpy.storage.JaniModel
 
-
     def _set_cex_options(self, add_cuts):
         self.cex_options.maximum_counterexamples = 10000
-        self.cex_options.continue_after_first_counterexample = 1 # was 1.
+        self.cex_options.continue_after_first_counterexample = 1
         self.cex_options.maximum_iterations_after_counterexample = 20
         self.cex_options.use_dynamic_constraints = True
         self.cex_options.add_backward_implication_cuts = True if int(add_cuts) > 0 else False
@@ -239,15 +247,14 @@ class Verifier:
         self.cex_options.check_threshold_feasible = False
         self.cex_options.silent = True
 
-
-
-    def _conflict_analysis(self, result):
+    def conflict_analysis(self, result):
         applied_cex = self._restrict_sketch(result)
         conflict = tuple(self._used_constants(applied_cex))
         logger.debug("Conflict of size {}".format(len(conflict)))
         return conflict
 
-    def _merge_conflict_properties(self, conflict_props):
+    @staticmethod
+    def merge_conflict_properties(conflict_props):
         merged_conflict_props = dict()
         eliminated = set()
         for i, p in enumerate(conflict_props):
@@ -263,49 +270,44 @@ class Verifier:
                     merged_conflict_props[p].append((q.raw_formula.reward_name, q.raw_formula.threshold))
         return merged_conflict_props
 
-    def _used_constants(self, model):
+    @staticmethod
+    def _used_constants(model):
         if type(model) == stormpy.storage.JaniModel:
-            vars = set()
+            variables = set()
             for automaton in model.automata:
-                automaton_index = model.get_automaton_index(automaton.name)
+                # automaton_index = model.get_automaton_index(automaton.name)
                 for edge_index, e in enumerate(automaton.edges):
-                    vars.update(e.guard.get_variables())
+                    variables.update(e.guard.get_variables())
                     for d in e.destinations:
                         for assignment in d.assignments:
-                            vars.update(assignment.expression.get_variables())
-                        vars.update(d.probability.get_variables())
+                            variables.update(assignment.expression.get_variables())
+                        variables.update(d.probability.get_variables())
 
-            var_names = set([var.name for var in vars])
+            var_names = set([var.name for var in variables])
             constants = set()
-            for c in model.constants:
-                if c.name in var_names:
-                    constants.add(c.name)
+            [constants.add(constant.name) for constant in model.constants if constant.name in var_names]
             return constants
         else:
             return [c.name for c in model.used_constants()]
 
     def _restrict_sketch(self, to):
-        if self.is_jani():
-            return self.sketch.restrict_edges(to)#.simplify()
-        else:
-            return self.sketch.restrict_commands(to).simplify()
+        return self.sketch.restrict_edges(to) if self.is_jani() else self.sketch.restrict_commands(to).simplify()
 
-    def _print_overlapping_guards(self, model):
+    @staticmethod
+    def _print_overlapping_guards(model):
         has_overlap_guards = model.labeling.get_states("overlap_guards")
         if has_overlap_guards.number_of_set_bits() == 0:
             return
 
         raise ValueError("Model has overlapping guards. This is not allowed")
 
-        assert model.has_choice_origins()
-        choice_origins = model.choice_origins
-        conflicting_sets = []
-        for state in model.states:
-            if has_overlap_guards[state.id]:
-                for action in state.actions:
-                    conflicting_sets.append(choice_origins.get_edge_index_set(state.id + action.id))
-
-        for cs in conflicting_sets:
-            print(choice_origins.model.restrict_edges(cs))
-
-
+        # assert model.has_choice_origins()
+        # choice_origins = model.choice_origins
+        # conflicting_sets = []
+        # for state in model.states:
+        #     if has_overlap_guards[state.id]:
+        #         for action in state.actions:
+        #             conflicting_sets.append(choice_origins.get_edge_index_set(state.id + action.id))
+        #
+        # for cs in conflicting_sets:
+        #     print(choice_origins.model.restrict_edges(cs))

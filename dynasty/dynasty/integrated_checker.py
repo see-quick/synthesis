@@ -1,47 +1,45 @@
 # author: Roman Andriushchenko
-
+import logging
+import time
 import z3
 
+import operator
 import stormpy
-import stormpy.utility
-import stormpy.core
 
-import dynasty.jani
-from dynasty.jani.jani_quotient_builder import *
 from dynasty.family_checkers.cegis import Synthesiser
 from dynasty.family_checkers.quotientbased import LiftingChecker
 from dynasty.family_checkers.familychecker import HoleOptions
 
-from collections import OrderedDict
-# from collections.abc import Iterable
-# import re
-import operator
+logger = logging.getLogger(__file__)
 
 # ------------------------------------------------------------------------------
 # wrappers
+
 
 def check_model(model, property, quantitative=False):
     """Model check a model against a (quantitative) property."""
     raw_formula = property.raw_formula
     formula = raw_formula
-    if(quantitative):
+    if quantitative:
         formula = formula.clone()
         formula.remove_bound()
 
     result = stormpy.model_checking(model, formula)
     satisfied = result.at(model.initial_states[0])
-    if(quantitative):
+    if quantitative:
         op = {
-            stormpy.ComparisonType.LESS : operator.lt,
-            stormpy.ComparisonType.LEQ : operator.le,
+            stormpy.ComparisonType.LESS: operator.lt,
+            stormpy.ComparisonType.LEQ: operator.le,
             stormpy.ComparisonType.GREATER: operator.gt,
             stormpy.ComparisonType.GEQ: operator.ge
-        } [raw_formula.comparison_type] 
-        satisfied = op(satisfied,raw_formula.threshold_expr.evaluate_as_double())
-    return satisfied,result
- 
+        }[raw_formula.comparison_type]
+        satisfied = op(satisfied, raw_formula.threshold_expr.evaluate_as_double())
+    return satisfied, result
+
+
 def readable_assignment(assignment):
-    return {k:v.__str__() for (k,v) in assignment.items()} if assignment is not None else None
+    return {k: v.__str__() for (k, v) in assignment.items()} if assignment is not None else None
+
 
 class Timer:
     def __init__(self):
@@ -91,80 +89,68 @@ class Statistic:
         self.result = assignment is not None
         self.assignment = readable_assignment(assignment)
         self.iterations = iterations
-    
+
     def __str__(self):
         is_feasible = "feasible" if self.result else  "unfeasible"
         return "> {}: {} ({} iters, {} sec)\n".format(self.method, is_feasible, self.iterations, round(self.timer.time,2))
 
 class CEGISChecker(Synthesiser):
     """CEGIS wrapper."""
-    def __init__(self, *args):
-        super().__init__(*args)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.statistic = Statistic("CEGIS")
 
     def run(self):
         _, assignment, _ = self.run_feasibility()
         self.statistic.finished(assignment, self.stats.iterations)
 
+
 class CEGARChecker(LiftingChecker):
     """CEGAR wrapper."""
-    def __init__(self,*args):
-        super().__init__(*args)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.statistic = Statistic("CEGAR")
-
-    def cegar_initialisation(self):
         self.iterations = 0
-        self.jani_quotient_builder = JaniQuotientBuilder(self.sketch, self.holes)
-        self._open_constants = self.holes
+        self.threshold = 0
         self.use_oracle = True
-
-        self.oracle = None
-        hole_options = [self.hole_options]
-        self.threshold = float(self.thresholds[0])
-
         self.new_options = None
         self.satisfying_assignment = None
+        self.oracle = None
 
-        # logger.debug("Threshold is {}".format(self.threshold))        
-        # logger.info("Total number of options: {}".format(self.hole_options.size()))
-
-        return hole_options
+    def cegar_initialisation(self):
+        self.jani_quotient_builder = JaniQuotientBuilder(self.sketch, self.holes)
+        self._open_constants = self.holes
+        self.threshold = float(self.thresholds[0])
+        return [self.hole_options]
 
     def cegar_split_option(self, option):
         self.oracle.scheduler_color_analysis()
         return self._split_hole_options(option, self.oracle)
 
-    def _analyse_from_scratch(self, option):
-        self.oracle = LiftingChecker._analyse_from_scratch(self, self._open_constants, option, set(), self.threshold) 
-
-    def _analyse_suboptions(self, option):
-        LiftingChecker._analyse_suboptions(self, self.oracle, option, self.threshold)
-        
     def _analyse_option(self, option):
         if self.oracle is None:
-            self._analyse_from_scratch(option)
+            self.oracle = LiftingChecker._analyse_from_scratch(
+                self, self._open_constants, option, set(), self.threshold
+            )
         else:
-            self._analyse_suboptions(option)
+            LiftingChecker._analyse_sub_options(self, self.oracle, option)
 
     def cegar_analyse_option(self, option):
         self.iterations += 1
-        logger.info("CEGAR: iteration {}, analysing option {}.".format(self.iterations, option)) #~
+        logger.info("CEGAR: iteration {}, analysing option {}.".format(self.iterations, option))
         self._analyse_option(option)
 
-        self.new_options = None
         threshold_synthesis_result = self.oracle.decided(self.threshold)
-        if threshold_synthesis_result == dynasty.jani.quotient_container.ThresholdSynthesisResult.UNDECIDED:
-            # undecided
+        if threshold_synthesis_result == ThresholdSynthesisResult.UNDECIDED:
             logger.debug("Undecided.")
             self.new_options = self.cegar_split_option(option)
-        else:
-            # decided
+        else:  # Decided option
             if (threshold_synthesis_result == ThresholdSynthesisResult.ABOVE) == self._accept_if_above[0]:
                 logger.debug("All above or all below.")
                 self.satisfying_assignment = option.pick_one_in_family()
             else:
                 logger.debug("Decided: unsatisfying.")
-            
+
     def run_feasibility(self):
         if self.input_has_optimality_property():
             return self._run_optimal_feasibility()
@@ -185,7 +171,7 @@ class CEGARChecker(LiftingChecker):
 
         logger.info("No more options to explore.")
         return None
-        
+
     def run(self):
         assignment = self.run_feasibility()
         self.statistic.finished(assignment, self.iterations)
@@ -193,20 +179,19 @@ class CEGARChecker(LiftingChecker):
 # ------------------------------------------------------------------------------
 # integrated method
 
+
 class IntegratedStatistic(Statistic):
     """Base stats + region info + CE stats"""
 
     def __init__(self):
         super().__init__("Hybrid")
         self.region_stats = []
-
-    def new_region(self, bound):
-        self.bound = bound
         self.iters = 0
         self.commands_old = 0
         self.commands_new = 0
         self.holes_old = 0
         self.holes_new = 0
+        self.bound = None
 
     def new_counterexample(self, commands_old, commands_new, holes_old, holes_new):
         self.iters += 1
@@ -233,12 +218,13 @@ class IntegratedStatistic(Statistic):
     def __str__(self):
         s = super().__str__()
         for (region_stat, storm_stat) in self.region_stats:
-            region_stat = [round(x,3) for x in region_stat]
-            storm_stat = [round(x,3) for x in storm_stat]
+            region_stat = [round(x, 3) for x in region_stat]
+            storm_stat = [round(x, 3) for x in storm_stat]
             s += "> {} : {}\n".format(region_stat, storm_stat)
         return s
 
-class IntegratedChecker(CEGISChecker,CEGARChecker):
+
+class IntegratedChecker(CEGISChecker, CEGARChecker):
     """Integrated checker."""
     
     def __init__(self):
@@ -247,19 +233,25 @@ class IntegratedChecker(CEGISChecker,CEGARChecker):
         self.cegis_iterations = 0
         self.cegar_iterations = 0
         self.statistic = IntegratedStatistic()
+        self.property = None
+        self.mdp = None
+        self.mdp_mc_result = None
+        self.allowed_to_split_options = True
 
     def initialise(self):
         CEGARChecker.initialise(self)
         CEGISChecker.initialise(self)
         assert len(self._verifier.properties) == 1
-        self.property = self._verifier.properties[0].property        
+        self.property = self._verifier.properties[0].property
 
     def result_exists(self, hole_options):
         """Check whether a satisfying assignment has been obtained or all regions have been explored."""
         return (self.satisfying_assignment is not None) or (len(hole_options) == 0)
 
     def compose_result(self, hole_options):
-        """Compose synthesis result: either satisfying assignment has been obtained or all regions have been explored."""
+        """
+        Compose synthesis result: either satisfying assignment has been obtained or all regions have been explored.
+        """
         if self.satisfying_assignment is not None:
             logger.info("Found satisfying assignment.")
             return self.satisfying_assignment
@@ -731,13 +723,13 @@ class IntegratedChecker(CEGISChecker,CEGARChecker):
         self.ce_quality_print()
 
 
-class Research():
+class Research:
     """Entry point: execution setup."""
     def __init__(
             self, check_prerequisites, backward_cuts,
             sketch_path, allowed_path, property_path, optimality_path, constants,
             restrictions, restriction_path
-        ):
+    ):
 
         assert not check_prerequisites
         assert not restrictions
@@ -749,11 +741,12 @@ class Research():
         self.constants = constants
         self.restrictions = restrictions
         self.restriction_path = restriction_path
+        self.backward_cuts = backward_cuts
 
         # import research.generator1
         # import research.generator2
         # workspace.generator2.run()
-        
+
         workdir = "workspace/experiments"
         with open(f"{workdir}/parameters.txt", 'r') as f:
             lines = f.readlines()
@@ -762,7 +755,7 @@ class Research():
         IntegratedChecker.stage_score_limit = stage_score_limit
         
         stats = []
-        
+
         if regime == 0:
             # stats.append(self.run_algorithm(CEGISChecker))
             # stats.append(self.run_algorithm(CEGARChecker))
@@ -777,16 +770,18 @@ class Research():
             # stats.append(self.run_algorithm(IntegratedChecker))
         else:
             assert None
-              
+
         print("\n")
         for stat in stats:
             print(stat)
-        
-    def run_algorithm(self, algorithmClass):
+
+    def run_algorithm(self, algorithm_class):
         print("\n\n\n")
-        print(algorithmClass.__name__)    
-        algorithm = algorithmClass()
-        algorithm.load_sketch(self.sketch_path, self.property_path, optimality_path=self.optimality_path, constant_str=self.constants)
+        print(algorithm_class.__name__)
+        algorithm = algorithm_class()
+        algorithm.load_sketch(
+            self.sketch_path, self.property_path, optimality_path=self.optimality_path, constant_str=self.constants
+        )
         algorithm.load_template_definitions(self.allowed_path)
         if self.restrictions:
             algorithm.load_restrictions(self.restriction_path)
