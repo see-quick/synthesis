@@ -1,4 +1,5 @@
 # author: Roman Andriushchenko
+# co-author: Simon Stupinsky
 import logging
 import time
 import z3
@@ -12,13 +13,10 @@ from dynasty.jani.jani_quotient_builder import JaniQuotientBuilder, ThresholdSyn
 
 logger = logging.getLogger(__file__)
 
-# ------------------------------------------------------------------------------
-# wrappers
 
-
-def check_model(model, property, quantitative=False):
+def check_model(model, property_obj, quantitative=False):
     """Model check a model against a (quantitative) property."""
-    raw_formula = property.raw_formula
+    raw_formula = property_obj.raw_formula
     formula = raw_formula
     if quantitative:
         formula = formula.clone()
@@ -35,10 +33,6 @@ def check_model(model, property, quantitative=False):
         }[raw_formula.comparison_type]
         satisfied = op(satisfied, raw_formula.threshold_expr.evaluate_as_double())
     return satisfied, result
-
-
-def readable_assignment(assignment):
-    return {k: v.__str__() for (k, v) in assignment.items()} if assignment is not None else None
 
 
 class Statistic:
@@ -62,11 +56,11 @@ class Statistic:
     def finished(self, assignment, iterations):
         self.toggle_timer()
         self.result = assignment is not None
-        self.assignment = readable_assignment(assignment)
+        self.assignment = {k: v.__str__() for (k, v) in assignment.items()} if assignment is not None else None
         self.iterations = iterations
 
     def __str__(self):
-        return "> {}: {} ({} iters, {} sec)\n".format(self.method, self.result, self.iterations, round(self.time, 2))
+        return f"> {self.method}: {self.result} ({self.iterations} iters, {round(self.time, 2)} sec)\n"
 
 
 class CEGISChecker(Synthesiser):
@@ -95,42 +89,40 @@ class CEGARChecker(LiftingChecker):
     def cegar_initialisation(self):
         self.jani_quotient_builder = JaniQuotientBuilder(self.sketch, self.holes)
         self._open_constants = self.holes
-        self.threshold = float(self.thresholds[0])
         return [self.hole_options]
 
-    def cegar_split_option(self, option):
-        self.oracle.scheduler_color_analysis()
+    def cegar_split_option(self, option, index=0):
+        self.oracle.scheduler_color_analysis(index)
         return self._split_hole_options(option, self.oracle)
 
     def _analyse_option(self, option):
         if self.oracle is None:
-            self.oracle = LiftingChecker._analyse_from_scratch(
-                self, self._open_constants, option, set(), self.threshold
-            )
+            self.oracle = LiftingChecker._analyse_from_scratch(self, self._open_constants, option, set())
         else:
             LiftingChecker._analyse_sub_options(self, self.oracle, option)
 
     def cegar_analyse_option(self, option):
         self.iterations += 1
-        logger.info("CEGAR: iteration {}, analysing option {}.".format(self.iterations, option))
+        logger.info(f"CEGAR: iteration {self.iterations}, analysing option {option}.")
         self._analyse_option(option)
 
-        threshold_synthesis_result = self.oracle.decided(self.threshold)
-        if threshold_synthesis_result == ThresholdSynthesisResult.UNDECIDED:
-            logger.debug("Undecided.")
-            self.new_options = self.cegar_split_option(option)
-        else:  # Decided option
-            if (threshold_synthesis_result == ThresholdSynthesisResult.ABOVE) == self._accept_if_above[0]:
-                logger.debug("All above or all below.")
-                self.satisfying_assignment = option.pick_one_in_family()
+        threshold_synthesis_results = self.oracle.decided(self.mc_formulae, self.thresholds)
+
+        if self._contains_unsat_result(threshold_synthesis_results):
+            logger.debug("Unsatisfying.")
+        else:
+            undecided_indices = \
+                [idx for idx, r in enumerate(threshold_synthesis_results) if r == ThresholdSynthesisResult.UNDECIDED]
+            if undecided_indices:
+                logger.debug("Undecided.")
+                self.new_options = self.cegar_split_option(option, undecided_indices[0])
             else:
-                logger.debug("Decided: unsatisfying.")
+                logger.debug("Satisfying.")
+                self.satisfying_assignment = option.pick_one_in_family()
 
     def run_feasibility(self):
         if self.input_has_optimality_property():
             return self._run_optimal_feasibility()
-        if self.input_has_multiple_properties():
-            raise RuntimeError("Lifting is only implemented for single properties")
         if self.input_has_restrictions():
             raise RuntimeError("Restrictions are not supported by quotient based approaches")
 
@@ -150,9 +142,6 @@ class CEGARChecker(LiftingChecker):
     def run(self):
         assignment = self.run_feasibility()
         self.statistic.finished(assignment, self.iterations)
-
-# ------------------------------------------------------------------------------
-# integrated method
 
 
 class IntegratedStatistic(Statistic):
@@ -193,7 +182,7 @@ class IntegratedStatistic(Statistic):
     def __str__(self):
         s = super().__str__()
         for (region_stat, storm_stat) in self.region_stats:
-            region_stat = [round(x, 3) for x in region_stat]
+            region_stat = [round(x, 3) if not isinstance(x, list) else x for x in region_stat]
             storm_stat = [round(x, 3) for x in storm_stat]
             s += "> {} : {}\n".format(region_stat, storm_stat)
         return s
@@ -212,16 +201,13 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         self.cegis_iterations = 0
         self.cegar_iterations = 0
         self.statistic = IntegratedStatistic()
-        self.property = None
         self.mdp = None
-        self.mdp_mc_result = None
+        self.mdp_mc_results = []
         self.allowed_to_split_options = True
 
     def initialise(self):
         CEGARChecker.initialise(self)
         CEGISChecker.initialise(self)
-        assert len(self._verifier.properties) == 1
-        self.property = self._verifier.properties[0].property
 
     def result_exists(self, hole_options):
         """Check whether a satisfying assignment has been obtained or all regions have been explored."""
@@ -242,72 +228,39 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         """Analyse region and store mdp data."""
         CEGARChecker.cegar_analyse_option(self, option)
         self.cegar_iterations += 1
-        self.mdp = self.oracle.mdp_handling().mdp()
-        self.mdp_mc_result = self.oracle.latest_result().result
+        self.mdp = self.oracle.mdp_handling.mdp
+        self.mdp_mc_results = [latest_result.result for latest_result in self.oracle.latest_results]
 
-    def cegar_split_option(self, option):
+    def cegar_split_option(self, option, index=0):
         """Split option when allowed."""
-        return super().cegar_split_option(option) if self.allowed_to_split_options else []
+        return super().cegar_split_option(option, index) if self.allowed_to_split_options else []
 
     def naive_stats(self, instance, all_conflicts=True):
         """Naive counterexample generation (for comparison)."""
-        model = self.verifier().build_model(instance)
-        qualitative_conflicts_properties, quantitative_conflict_properties = \
-            self.verifier().naive_check_model(model, all_conflicts)
+        result, conflicts = self._verifier.naive_check(instance, all_conflicts, naive_stats=True)
+        # TODO: How does this comparison of counter-examples for multiple properties?
+        return sum([len(r) for r in result]), sum([len(c) for c in conflicts])
 
-        if qualitative_conflicts_properties:
-            # conflicts.add(tuple([c.name for c in self.sketch.used_constants()]))
-            # TODO handling for qualitative conflicts can certainly be improved.
-            return qualitative_conflicts_properties, set()
-
-        # Construct the environment for the counterexample generator.
-        env = stormpy.core.Environment()
-        env.solver_environment.set_linear_equation_solver_type(stormpy.EquationSolverType.native)
-        # env.solver_environment.set_force_sound()
-
-        # We can sometimes merge properties into a single meta-property for conflict analysis.
-        merged_conflict_props = self.verifier().merge_conflict_properties(quantitative_conflict_properties)
-        assert(len(merged_conflict_props) == 1)
-        (p, additional) = next(iter(merged_conflict_props.items()))
-
-        # Create input for the counterexample generation.
-        symbolic_model = stormpy.SymbolicModelDescription(instance)
-        cex_input = stormpy.core.SMTCounterExampleGenerator.precompute(env, symbolic_model, model, p.raw_formula)
-        for a in additional:
-            cex_input.add_reward_and_threshold(a[0], a[1])
-
-        # Prepare execution of the counterexample generation
-        cex_stats = stormpy.core.SMTCounterExampleGeneratorStats()
-        # Generate the counterexample
-        result = stormpy.core.SMTCounterExampleGenerator.build(
-            env, cex_stats, symbolic_model, model, cex_input,
-            self._verifier().dont_care_set(), self._verifier().cex_options
-        )
-        assert(result.__len__() == 1)
-        critical_edges_fs = result.pop()
-
-        # Translate the counterexamples into conflicts.
-        conflicting_holes = self._verifier().conflict_analysis(critical_edges_fs)
-
-        return len(critical_edges_fs), len(conflicting_holes)
-
-    def cegis_analyse_option(self, builder_options, option, mdp, mdp_result):
+    def cegis_analyse_option(self, builder_options, option, mdp, mdp_results):
         """Analyse a region using provided mdp data to construct smaller counterexamples."""
-        logger.info("CEGIS: analysing option {}.".format(option))
-        self.statistic.bound = mdp_result.at(mdp.initial_states[0])
+        logger.info(f"CEGIS: analysing option {option}.")
+        self.statistic.bound = [mdp_result.at(mdp.initial_states[0]) for mdp_result in mdp_results]
 
         # reset solver
         self.hole_options = option
         self._initialize_solver()
 
-        # prepare counterexample generator
-        counterexample = stormpy.SynthesisResearchCounterexample(
-            IntegratedChecker.expanded_per_iter, self.property.raw_formula, mdp, mdp_result
-        )
+        # Prepare counter-example generator for each given property
+        assert len(self.properties) == len(mdp_results)
+        counterexamples = []
+        for prop, mdp_result in zip(self.properties, mdp_results):
+            counterexamples.append(stormpy.SynthesisResearchCounterexample(
+                IntegratedChecker.expanded_per_iter, prop.raw_formula, mdp, mdp_result
+            ))
 
         while True:
             self.cegis_iterations += 1
-            logger.info("CEGIS: iteration {}.".format(self.cegis_iterations))
+            logger.info(f"CEGIS: iteration {self.cegis_iterations}.")
 
             # get satisfiable assignment
             solver_result = self.solver.check()
@@ -316,7 +269,7 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
                 break
             sat_model = self.solver.model()
 
-            logger.debug("Iteration: {} instantiating..".format(self.stats.iterations))
+            logger.debug(f"Iteration: {self.stats.iterations} instantiating..")
             # Create an assignment for the holes ..
             hole_assignments = self._sat_model_to_constants_assignment(sat_model)
             # and construct instance ..
@@ -326,30 +279,31 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
             dtmc = stormpy.build_sparse_model_with_options(instance, builder_options)
             assert len(dtmc.initial_states) == 1  # to avoid ambiguity
             assert dtmc.initial_states[0] == 0  # is implied by topological ordering
-            logger.info("Built a DTMC with {} states.".format(dtmc.nr_states))
+            logger.info(f"Built a DTMC with {dtmc.nr_states} states.")
 
-            dtmc_sat, dtmc_result = check_model(dtmc, self.property, quantitative=True)
-            if dtmc_sat:
+            satisfied = []
+            for index, prop in enumerate(self.properties):
+                dtmc_sat, dtmc_result = check_model(dtmc, prop, quantitative=True)
+                satisfied.append(dtmc_sat)
+                if not dtmc_sat:
+                    critical_edges = counterexamples[index].construct(dtmc, dtmc_result)
+                    conflict = self.verifier.conflict_analysis(critical_edges)
+                    clause = z3.Not(z3.And(
+                        [var == sat_model[var] for var, hole in self.template_meta_vars.items() if hole in conflict]
+                    ))
+                    self.solver.add(clause)
+
+            if all(satisfied):
                 self.satisfying_assignment = hole_assignments
                 break
 
-            # logger.debug("Constructing a minimal counterexample.")
-            critical_edges = counterexample.construct(dtmc, dtmc_result)
-            conflict = self._verifier().conflict_analysis(critical_edges)
-
-            # add new clause
-            clause = z3.Not(z3.And(
-                [var == sat_model[var] for var, hole in self.template_meta_vars.items() if hole in conflict]
-            ))
-            self.solver.add(clause)
-
-        self.statistic.end_region(counterexample.stats)
+        for ce in counterexamples:
+            self.statistic.end_region(ce.stats)
 
     def run_feasibility(self):
         """Run feasibility synthesis."""
         assert not self.input_has_optimality_property()
-        assert not self.input_has_multiple_properties()
-        assert not self.input_has_restrictions()
+        # assert not self.input_has_restrictions()
 
         # perform MDP model checking & extract bounds on reachability probability;
         # explore options (DFS) just before reaching the limit of mdp iterations
@@ -380,14 +334,15 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
             if self.satisfying_assignment is not None:
                 break
             if self.new_options is not None:
-                logger.info("Storing hole option {} for CEGIS processing.".format(option))
-                mdp_problems.append((option, self.mdp, self.mdp_mc_result))
-        logger.info("MDP model checking finished after {} iterations, there are {} areas to explore.".format(
-            self.cegar_iterations, len(mdp_problems)
-        ))
+                logger.info(f"Storing hole option {option} for CEGIS processing.")
+                mdp_problems.append((option, self.mdp, self.mdp_mc_results))
+        logger.info(
+            f"MDP model checking finished after {self.cegar_iterations} iterations, "
+            f"there are {len(mdp_problems)} areas to explore."
+        )
 
         # precompute DTMC builder options
-        builder_options = stormpy.BuilderOptions([self.property.raw_formula])
+        builder_options = stormpy.BuilderOptions([p.raw_formula for p in self.properties])
         builder_options.set_build_with_choice_origins(True)
         builder_options.set_build_state_valuations(True)
         builder_options.set_add_overlapping_guards_label()
@@ -395,8 +350,8 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         # initiate CEGIS for each hole_option
         logger.info("Initiating CEGIS phase.")
 
-        for (option, mdp, mdp_mc_result) in mdp_problems:
-            self.cegis_analyse_option(builder_options, option, mdp, mdp_mc_result)
+        for (option, mdp, mdp_mc_results) in mdp_problems:
+            self.cegis_analyse_option(builder_options, option, mdp, mdp_mc_results)
             if self.satisfying_assignment is not None:
                 break
 
@@ -410,13 +365,12 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
 class Research:
     """Entry point: execution setup."""
     def __init__(
-            self, check_prerequisites, backward_cuts,
-            sketch_path, allowed_path, property_path, optimality_path, constants,
-            restrictions, restriction_path
+            self, check_prerequisites, backward_cuts, sketch_path, allowed_path, property_path,
+            optimality_path, constants, restrictions, restriction_path
     ):
 
         assert not check_prerequisites
-        assert not restrictions
+        # assert not restrictions
 
         self.sketch_path = sketch_path
         self.allowed_path = allowed_path
@@ -443,9 +397,9 @@ class Research:
         stats = []
 
         if regime == 0:
-            stats.append(self.run_algorithm(CEGISChecker))
-            stats.append(self.run_algorithm(CEGARChecker))
-            # stats.append(self.run_algorithm(IntegratedChecker))
+            # stats.append(self.run_algorithm(CEGISChecker))
+            # stats.append(self.run_algorithm(CEGARChecker))
+            stats.append(self.run_algorithm(IntegratedChecker))
         elif regime == 1:
             # stats.append(self.run_algorithm(CEGISChecker))
             # stats.append(self.run_algorithm(CEGARChecker))
