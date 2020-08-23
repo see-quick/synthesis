@@ -1,4 +1,5 @@
 # author: Roman Andriushchenko
+# co-author: Simon Stupinsky
 import logging
 import time
 import z3
@@ -12,13 +13,10 @@ from dynasty.family_checkers.familychecker import HoleOptions
 
 logger = logging.getLogger(__file__)
 
-# ------------------------------------------------------------------------------
-# wrappers
 
-
-def check_model(model, property, quantitative=False):
+def check_model(model, property_obj, quantitative=False):
     """Model check a model against a (quantitative) property."""
-    raw_formula = property.raw_formula
+    raw_formula = property_obj.raw_formula
     formula = raw_formula
     if quantitative:
         formula = formula.clone()
@@ -87,7 +85,7 @@ class Statistic:
     def finished(self, assignment, iterations):
         self.timer.toggle()
         self.result = assignment is not None
-        self.assignment = readable_assignment(assignment)
+        self.assignment = {k: v.__str__() for (k, v) in assignment.items()} if assignment is not None else None
         self.iterations = iterations
 
     def __str__(self):
@@ -120,42 +118,40 @@ class CEGARChecker(LiftingChecker):
     def cegar_initialisation(self):
         self.jani_quotient_builder = JaniQuotientBuilder(self.sketch, self.holes)
         self._open_constants = self.holes
-        self.threshold = float(self.thresholds[0])
         return [self.hole_options]
 
-    def cegar_split_option(self, option):
-        self.oracle.scheduler_color_analysis()
+    def cegar_split_option(self, option, index=0):
+        self.oracle.scheduler_color_analysis(index)
         return self._split_hole_options(option, self.oracle)
 
     def _analyse_option(self, option):
         if self.oracle is None:
-            self.oracle = LiftingChecker._analyse_from_scratch(
-                self, self._open_constants, option, set(), self.threshold
-            )
+            self.oracle = LiftingChecker._analyse_from_scratch(self, self._open_constants, option, set())
         else:
             LiftingChecker._analyse_sub_options(self, self.oracle, option)
 
     def cegar_analyse_option(self, option):
         self.iterations += 1
-        logger.info("CEGAR: iteration {}, analysing option {}.".format(self.iterations, option))
+        logger.info(f"CEGAR: iteration {self.iterations}, analysing option {option}.")
         self._analyse_option(option)
 
-        threshold_synthesis_result = self.oracle.decided(self.threshold)
-        if threshold_synthesis_result == ThresholdSynthesisResult.UNDECIDED:
-            logger.debug("Undecided.")
-            self.new_options = self.cegar_split_option(option)
-        else:  # Decided option
-            if (threshold_synthesis_result == ThresholdSynthesisResult.ABOVE) == self._accept_if_above[0]:
-                logger.debug("All above or all below.")
-                self.satisfying_assignment = option.pick_one_in_family()
+        threshold_synthesis_results = self.oracle.decided(self.mc_formulae, self.thresholds)
+
+        if self._contains_unsat_result(threshold_synthesis_results):
+            logger.debug("Unsatisfying.")
+        else:
+            undecided_indices = \
+                [idx for idx, r in enumerate(threshold_synthesis_results) if r == ThresholdSynthesisResult.UNDECIDED]
+            if undecided_indices:
+                logger.debug("Undecided.")
+                self.new_options = self.cegar_split_option(option, undecided_indices[0])
             else:
-                logger.debug("Decided: unsatisfying.")
+                logger.debug("Satisfying.")
+                self.satisfying_assignment = option.pick_one_in_family()
 
     def run_feasibility(self):
         if self.input_has_optimality_property():
             return self._run_optimal_feasibility()
-        if self.input_has_multiple_properties():
-            raise RuntimeError("Lifting is only implemented for single properties")
         if self.input_has_restrictions():
             raise RuntimeError("Restrictions are not supported by quotient based approaches")
 
@@ -175,9 +171,6 @@ class CEGARChecker(LiftingChecker):
     def run(self):
         assignment = self.run_feasibility()
         self.statistic.finished(assignment, self.iterations)
-
-# ------------------------------------------------------------------------------
-# integrated method
 
 
 class IntegratedStatistic(Statistic):
@@ -218,7 +211,7 @@ class IntegratedStatistic(Statistic):
     def __str__(self):
         s = super().__str__()
         for (region_stat, storm_stat) in self.region_stats:
-            region_stat = [round(x, 3) for x in region_stat]
+            region_stat = [round(x, 3) if not isinstance(x, list) else x for x in region_stat]
             storm_stat = [round(x, 3) for x in storm_stat]
             s += "> {} : {}\n".format(region_stat, storm_stat)
         return s
@@ -233,16 +226,13 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         self.cegis_iterations = 0
         self.cegar_iterations = 0
         self.statistic = IntegratedStatistic()
-        self.property = None
         self.mdp = None
-        self.mdp_mc_result = None
+        self.mdp_mc_results = []
         self.allowed_to_split_options = True
 
     def initialise(self):
         CEGARChecker.initialise(self)
         CEGISChecker.initialise(self)
-        assert len(self._verifier.properties) == 1
-        self.property = self._verifier.properties[0].property
 
     def result_exists(self, hole_options):
         """Check whether a satisfying assignment has been obtained or all regions have been explored."""
@@ -609,14 +599,13 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         """Run feasibility synthesis."""
         logger.info("Running feasibility synthesis.")
         assert not self.input_has_optimality_property()
-        assert not self.input_has_multiple_properties()
-        assert not self.input_has_restrictions()
+        # assert not self.input_has_restrictions()
 
         # measure ce quality
         self.ce_quality_init()
         
         # precompute DTMC builder options
-        builder_options = stormpy.BuilderOptions([self.property.raw_formula])
+        builder_options = stormpy.BuilderOptions([p.raw_formula for p in self.properties])
         builder_options.set_build_with_choice_origins(True)
         builder_options.set_build_state_valuations(True)
         # builder_options.set_add_overlapping_guards_label() #?
@@ -726,13 +715,12 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
 class Research:
     """Entry point: execution setup."""
     def __init__(
-            self, check_prerequisites, backward_cuts,
-            sketch_path, allowed_path, property_path, optimality_path, constants,
-            restrictions, restriction_path
+            self, check_prerequisites, backward_cuts, sketch_path, allowed_path, property_path,
+            optimality_path, constants, restrictions, restriction_path
     ):
 
         assert not check_prerequisites
-        assert not restrictions
+        # assert not restrictions
 
         self.sketch_path = sketch_path
         self.allowed_path = allowed_path

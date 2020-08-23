@@ -55,23 +55,27 @@ class Verifier:
         """
         return self.naive_check(instance, all_conflicts, naive_deadlocks)
 
-    def naive_check(self, instance, all_conflicts, naive_deadlocks=True, check_conflicts=False):
+    def naive_check(self, instance, all_conflicts, naive_deadlocks=True, check_conflicts=False, naive_stats=False):
         """
 
         :param instance:
         :param all_conflicts:
         :param naive_deadlocks:
         :param check_conflicts:
+        :param naive_stats:
         :return:
         """
         self.nr_checks += 1
+
+        # Build DTMC from the given instance.
         logger.debug("Build DTMC....")
         model = self.build_model(instance)
-        logger.debug("...done building DTMC (with {} states and {} transitions)".format(model.nr_states,
-                                                                                        model.nr_transitions))
+        logger.debug(f"...done building DTMC (with {model.nr_states} states and {model.nr_transitions} transitions)")
+
         # Analyse which properties hold.
-        qualitative_conflicts_properties, quantitative_conflict_properties = self._naive_check_model(model,
-                                                                                                     all_conflicts)
+        qualitative_conflicts_properties, quantitative_conflict_properties = \
+            self._naive_check_model(model, all_conflicts)
+
         if qualitative_conflicts_properties:
             # conflicts.add(tuple([c.name for c in self.sketch.used_constants()]))
             # TODO handling for qualitative conflicts can certainly be improved.
@@ -85,26 +89,32 @@ class Verifier:
         # We can sometimes merge properties into a single meta-property for conflict analysis.
         merged_conflict_props = self.merge_conflict_properties(quantitative_conflict_properties)
 
-        conflicts = set()
         assert self._dont_care_set is not None
+        conflicts, result = set(), set()
         for p, additional in merged_conflict_props.items():
-            logger.debug("Conflict analysis for {} and {}".format(p.raw_formula, ",".join(
-                [str(a[0]) + " " + str(a[1]) for a in additional])))
+            logger.debug(
+                f'Conflict analysis for {p.raw_formula} and '
+                f'{",".join([str(a[0]) + " " + str(a[1]) for a in additional])}'
+            )
+
+            # Start timer for counter-example generation
             conflict_analysis_timer = time.time()
 
             # Create input for the counterexample generation.
             symbolic_model = stormpy.SymbolicModelDescription(instance)
             cex_input = stormpy.core.SMTCounterExampleGenerator.precompute(env, symbolic_model, model, p.raw_formula)
-            for a in additional:
-                cex_input.add_reward_and_threshold(a[0], a[1])
+            [cex_input.add_reward_and_threshold(a[0], a[1]) for a in additional]
 
             # Prepare execution of the counterexample generation
             cex_stats = stormpy.core.SMTCounterExampleGeneratorStats()
             # Generate the counterexample
-            result = stormpy.core.SMTCounterExampleGenerator.build(env, cex_stats, symbolic_model, model, cex_input,
-                                                                   self._dont_care_set, self.cex_options)
+            result = stormpy.core.SMTCounterExampleGenerator.build(
+                env, cex_stats, symbolic_model, model, cex_input, self._dont_care_set, self.cex_options
+            )
             # And put the counterexamples into a set.
             result = set(result)
+
+            # Stop timer for counter-example generation
             conflict_analysis_time = time.time() - conflict_analysis_timer
 
             logger.debug("Found {} counterexamples.".format(len(result)))
@@ -112,26 +122,30 @@ class Verifier:
             # Translate the counterexamples into conflicts.
             analysed_conflicts = [self.conflict_analysis(conflict) for conflict in result]
             analysed_conflicts.sort()
-            if check_conflicts:
-                # Checking conflicts if for debugging purposes only.
-                # We double check whether the counterexamples violate the properties.
-                for cex in result:
-                    test_model = self.build_model(
-                        instance.restrict_edges(cex), with_origins=False, register_stats=False
-                    )
-                    qualitative_conflicts_properties, quantitative_conflict_properties = self._naive_check_model(
-                        test_model, all_conflicts)
-                    assert len(quantitative_conflict_properties) > 0
 
-            # And store details for benchmarking etc.
+            if check_conflicts:
+                self._check_conflicts(result, instance, all_conflicts)
+
+            # Store details for benchmarking etc.
             self.stats.report_conflict_analysis_stats(cex_stats)
             self.stats.report_conflict_details(p, conflict_analysis_time, analysed_conflicts)
 
-            # And update the list of found conflicts
+            # Update the list of found conflicts
             for ac in analysed_conflicts:
                 conflicts.update([ac])
 
-        return qualitative_conflicts_properties, conflicts
+        return result if naive_stats else qualitative_conflicts_properties, conflicts
+
+    def _check_conflicts(self, result, instance, all_conflicts):
+        # Checking conflicts if for debugging purposes only.
+        # We double check whether the counterexamples violate the properties.
+        for cex in result:
+            test_model = self.build_model(
+                instance.restrict_edges(cex), with_origins=False, register_stats=False
+            )
+            qualitative_conflicts_properties, quantitative_conflict_properties = \
+                self._naive_check_model(test_model, all_conflicts)
+            assert len(quantitative_conflict_properties) > 0
 
     def build_model(self, instance, with_origins=True, register_stats=True):
         """
