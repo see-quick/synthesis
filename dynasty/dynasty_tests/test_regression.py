@@ -1,4 +1,3 @@
-import os.path
 import pytest
 import logging
 import click.testing
@@ -14,12 +13,15 @@ benchmarks_feasibility = [
                  "single.properties", "none.restrictions"),
     pytest.param("examples/grid", "4x4grid_sl.templ", "CMAX=11,T_EXP=10.0,T_SLOW=10.0,T_FAST=0.9", "4x4grid_sl.allowed",
                  "single.properties", "none.restrictions"),
+    pytest.param("workspace/examples/pole-live-safe", "sketch.templ", "THRESHOLD_S=0.9,CMAX_S=3,"
+                 "THRESHOLD_L=0.1,CMAX_L=7", "sketch.allowed", "sketch.properties", "none.restrictions")
 ]
 
 methods_feasibility = [
     "lift",
     "cschedenum",
-    "cegis"
+    "cegis",
+    "research"
 ]
 
 
@@ -55,7 +57,7 @@ benchmarks_optimal_feasibility = [
                  "none.properties", "none.restrictions", "fast_to_target.optimal"),
 ]
 
-methods_optimal_feasibility = methods_feasibility
+methods_optimal_feasibility = methods_feasibility[:-1]
 
 
 @pytest.mark.parametrize("project,sketch,constants,allowed,properties,restrictions,optimal",
