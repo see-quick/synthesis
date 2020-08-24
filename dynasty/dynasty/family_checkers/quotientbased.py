@@ -129,7 +129,7 @@ class LiftingChecker(QuotientBasedFamilyChecker):
         logger.info(f"Total number of options: {self.hole_options.size()}")
 
         while True and nr_options_remaining:
-            iterations, oracle, threshold_synthesis_results = self.foo(
+            iterations, oracle, threshold_synthesis_results = self._perform_analysis(
                 iterations, hole_options, hole_options_next_round, oracle
             )
 
@@ -172,7 +172,7 @@ class LiftingChecker(QuotientBasedFamilyChecker):
         optimal_hole_options = None
 
         while True:
-            iterations, oracle, threshold_synthesis_result = self.foo(
+            iterations, oracle, threshold_synthesis_result = self._perform_analysis(
                 iterations, hole_options, hole_options_next_round, oracle
             )
 
@@ -249,7 +249,7 @@ class LiftingChecker(QuotientBasedFamilyChecker):
 
             logger.info(f"Optimal value at {self.thresholds[0]} with {optimal_hole_options}")
 
-    def foo(self, iterations, hole_options, hole_options_next_round, oracle):
+    def _perform_analysis(self, iterations, hole_options, hole_options_next_round, oracle):
         iterations += 1
         logger.info(
             f"Start with iteration {iterations} (queue length: {len(hole_options)} + {len(hole_options_next_round)})."
@@ -289,7 +289,7 @@ class LiftingChecker(QuotientBasedFamilyChecker):
         hole_options_next_round = []
         self.use_oracle = True
         while True:
-            iterations, oracle, threshold_synthesis_result = self.foo(
+            iterations, oracle, threshold_synthesis_result = self._perform_analysis(
                 iterations, hole_options, hole_options_next_round, oracle
             )
 
