@@ -213,7 +213,7 @@ class IntegratedStatistic(Statistic):
         for (region_stat, storm_stat) in self.region_stats:
             region_stat = [round(x, 3) if not isinstance(x, list) else x for x in region_stat]
             storm_stat = [round(x, 3) for x in storm_stat]
-            s += "> {} : {}\n".format(region_stat, storm_stat)
+            # s += "> {} : {}\n".format(region_stat, storm_stat)
         return s
 
 

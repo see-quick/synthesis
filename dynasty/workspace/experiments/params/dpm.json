@@ -1,0 +1,36 @@
+{
+  "dpm": {
+    "safety": [
+      {
+        "threshold": 0.003,
+        "cegar_iters_limit": 49,
+        "cegis_expanded_per_iter": 151
+      },
+      {
+        "threshold": 0.005,
+        "cegar_iters_limit": 39,
+        "cegis_expanded_per_iter": 381
+      },
+      {
+        "threshold": 0.007,
+        "cegar_iters_limit": 29,
+        "cegis_expanded_per_iter": 351
+      },
+      {
+        "threshold": 0.009,
+        "cegar_iters_limit": 1,
+        "cegis_expanded_per_iter": 451
+      },
+      {
+        "threshold": 0.011,
+        "cegar_iters_limit": 1,
+        "cegis_expanded_per_iter": 431
+      },
+      {
+        "threshold": 0.013,
+        "cegar_iters_limit": 1,
+        "cegis_expanded_per_iter": 401
+      }
+    ]
+  }
+}

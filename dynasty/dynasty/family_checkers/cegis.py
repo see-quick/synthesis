@@ -115,7 +115,8 @@ class Synthesiser(FamilyChecker):
 
         self.stats.total_time = time.time() - synthesis_time
         concr.wait(futures)
-        return bool(self.result), self.result, self._verifier.optimal_value if self.result is not None else None
+        return bool(self.result), self.result, self._verifier.optimal_value, self.stats.iterations \
+            if self.result is not None else None
 
     def build_instance(self, assignments):
         """
