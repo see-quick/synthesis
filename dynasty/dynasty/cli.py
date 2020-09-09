@@ -131,6 +131,7 @@ def dynasty(
     start_time = time.time()
     result = algorithm.run_partitioning() if partitioning else algorithm.run_feasibility()
     end_time = time.time()
+    iterations = 0  # TODO: Return from optimal and partitioning methods
 
     if partitioning:
         if result is not None:
@@ -140,7 +141,7 @@ def dynasty(
             print("Solver finished without returning a result (probably not implemented).")
     else:
         if result is not None:
-            sat, solution, optimal_value = result
+            sat, solution, optimal_value, iterations = result
             if sat:
                 print("Satisfiable!")
                 if solution is not None:
@@ -153,15 +154,15 @@ def dynasty(
         else:
             print("Solver finished without a result provided.")
 
-    logger.info("Finished after {} seconds.".format(end_time - start_time))
+    print(f"{end_time - start_time}, {iterations}, {sat}")
 
-    if print_stats:
-        algorithm.print_stats()
+    # if print_stats:
+    #     algorithm.print_stats()
 
     description = "-".join([str(x) for x in
                             [project, sketch, allowed, restrictions, optimality, properties, check_prerequisites,
                              backward_cuts, "sat" if result is not None else "unsat"]])
-    dump_stats_to_file(stats, algorithm.stats_keyword, constants, description, algorithm.store_in_statistics())
+    # dump_stats_to_file(stats, algorithm.stats_keyword, constants, description, algorithm.store_in_statistics())
 
 
 def main():

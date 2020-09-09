@@ -144,7 +144,7 @@ class LiftingChecker(QuotientBasedFamilyChecker):
                     hole_options = self._split_hole_options(hole_options[0], oracle) + hole_options[1:]
                 else:
                     logger.debug("Satisfying.")
-                    return True, hole_options[0].pick_one_in_family(), None
+                    return True, hole_options[0].pick_one_in_family(), None, iterations
 
                 next_round = self._check_next_round(oracle, hole_options, hole_options_next_round, nr_options_remaining)
                 if bool(next_round):
@@ -152,7 +152,7 @@ class LiftingChecker(QuotientBasedFamilyChecker):
                 elif next_round is not None:
                     hole_options, hole_options_next_round = hole_options_next_round, []
 
-        return False, None, None
+        return False, None, None, iterations
 
     def _run_optimal_feasibility(self):
         """

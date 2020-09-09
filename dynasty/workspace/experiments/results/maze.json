@@ -1,0 +1,176 @@
+{
+  "maze": {
+    "liveness": {
+      "0.74": {
+        "research": {
+          "time": 1.45,
+          "iters": "5 - 5"
+        },
+        "lift": {
+          "time": 60.195,
+          "iters": "180"
+        },
+        "cegis": {
+          "time": 1.473,
+          "iters": "3"
+        }
+      },
+      "0.76": {
+        "research": {
+          "time": 0.92,
+          "iters": "3 - 3"
+        },
+        "lift": {
+          "time": 2.875,
+          "iters": "20"
+        },
+        "cegis": {
+          "time": 2.872,
+          "iters": "20"
+        }
+      },
+      "0.78": {
+        "research": {
+          "time": 0.92,
+          "iters": "3 - 3"
+        },
+        "lift": {
+          "time": 2.876,
+          "iters": "20"
+        },
+        "cegis": {
+          "time": 160.391,
+          "iters": "26"
+        }
+      },
+      "0.8": {
+        "research": {
+          "time": 0.93,
+          "iters": "3 - 3"
+        },
+        "lift": {
+          "time": 2.884,
+          "iters": "20"
+        },
+        "cegis": {
+          "time": 92.9,
+          "iters": "18"
+        }
+      },
+      "0.82": {
+        "research": {
+          "time": 1.0,
+          "iters": "3 - 4"
+        },
+        "lift": {
+          "time": 2.89,
+          "iters": "20"
+        },
+        "cegis": {
+          "time": 2.871,
+          "iters": "20"
+        }
+      },
+      "0.84": {
+        "research": {
+          "time": 0.24,
+          "iters": "1 - 0"
+        },
+        "lift": {
+          "time": 0.211,
+          "iters": "1"
+        },
+        "cegis": {
+          "time": 2.992,
+          "iters": "None"
+        }
+      }
+    },
+    "safety": {
+      "0.16": {
+        "research": {
+          "time": 0.32,
+          "iters": "1 - 0"
+        },
+        "lift": {
+          "time": 0.295,
+          "iters": "1"
+        },
+        "cegis": {
+          "time": 0.425,
+          "iters": "None"
+        }
+      },
+      "0.18": {
+        "research": {
+          "time": 1.41,
+          "iters": "1 - 8"
+        },
+        "lift": {
+          "time": 4.243,
+          "iters": "19"
+        },
+        "cegis": {
+          "time": 26.64,
+          "iters": "11"
+        }
+      },
+      "0.2": {
+        "research": {
+          "time": 0.59,
+          "iters": "1 - 3"
+        },
+        "lift": {
+          "time": 4.229,
+          "iters": "19"
+        },
+        "cegis": {
+          "time": 17.678,
+          "iters": "9"
+        }
+      },
+      "0.22": {
+        "research": {
+          "time": 0.6,
+          "iters": "1 - 3"
+        },
+        "lift": {
+          "time": 4.267,
+          "iters": "19"
+        },
+        "cegis": {
+          "time": 48.432,
+          "iters": "11"
+        }
+      },
+      "0.24": {
+        "research": {
+          "time": 0.6,
+          "iters": "1 - 3"
+        },
+        "lift": {
+          "time": 4.178,
+          "iters": "19"
+        },
+        "cegis": {
+          "time": 44.354,
+          "iters": "11"
+        }
+      },
+      "0.26": {
+        "research": {
+          "time": 0.59,
+          "iters": "1 - 3"
+        },
+        "lift": {
+          "time": 4.194,
+          "iters": "19"
+        },
+        "cegis": {
+          "time": 1.551,
+          "iters": "3"
+        }
+      }
+    }
+  }
+}

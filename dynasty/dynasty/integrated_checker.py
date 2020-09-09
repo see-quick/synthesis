@@ -60,7 +60,7 @@ class Statistic:
         self.iterations = iterations
 
     def __str__(self):
-        return f"> {self.method}: {self.result} ({self.iterations} iters, {round(self.time, 2)} sec)\n"
+        return f"{round(self.time, 2)}, {self.iterations}, {self.result}"
 
 
 class CEGISChecker(Synthesiser):
@@ -184,7 +184,7 @@ class IntegratedStatistic(Statistic):
         for (region_stat, storm_stat) in self.region_stats:
             region_stat = [round(x, 3) if not isinstance(x, list) else x for x in region_stat]
             storm_stat = [round(x, 3) for x in storm_stat]
-            s += "> {} : {}\n".format(region_stat, storm_stat)
+            # s += "> {} : {}\n".format(region_stat, storm_stat)
         return s
 
 
@@ -359,7 +359,7 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
 
     def run(self):
         assignment = self.run_feasibility()
-        self.statistic.finished(assignment, (self.cegar_iterations, self.cegis_iterations))
+        self.statistic.finished(assignment, str(self.cegar_iterations) + " - " + str(self.cegis_iterations))
 
 
 class Research:
