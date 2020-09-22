@@ -545,10 +545,10 @@ class ConsistentSchedChecker(QuotientBasedFamilyChecker):
                 for index, result in enumerate(threshold_synthesis_results):
                     if result == ThresholdSynthesisResult.ABOVE and self._accept_if_above[index]:
                         if index == len(threshold_synthesis_results) - 1:
-                            return True, selected_hole_option.pick_one_in_family(), None
+                            return True, selected_hole_option.pick_one_in_family(), None, iterations
                     elif result == ThresholdSynthesisResult.BELOW and not self._accept_if_above[index]:
                         if index == len(threshold_synthesis_results) - 1:
-                            return True, selected_hole_option.pick_one_in_family(), None
+                            return True, selected_hole_option.pick_one_in_family(), None, iterations
                     else:
                         break
             elif mode == 1:
@@ -579,8 +579,8 @@ class ConsistentSchedChecker(QuotientBasedFamilyChecker):
             )
 
         if mode == 0:
-            return False, None, None
+            return False, None, None, 0
         elif mode == 1:
-            return best_result is not None, best_result, self.thresholds[0]
+            return best_result is not None, best_result, self.thresholds[0], iterations
         else:
             return above, below

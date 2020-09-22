@@ -133,6 +133,7 @@ def dynasty(
     end_time = time.time()
     iterations = 0  # TODO: Return from optimal and partitioning methods
 
+    sat = None
     if partitioning:
         if result is not None:
             above, below = result
