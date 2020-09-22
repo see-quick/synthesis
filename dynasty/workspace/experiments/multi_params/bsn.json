@@ -1,0 +1,74 @@
+[
+  {
+    "thresholds": [
+      0.042,
+      0.987
+    ],
+    "cegar_iters_limit": 1,
+    "cegis_expanded_per_iter": 1
+  },
+  {
+    "thresholds": [
+      0.042,
+      0.988
+    ],
+    "cegar_iters_limit": 1,
+    "cegis_expanded_per_iter": 1
+  },
+  {
+    "thresholds": [
+      0.042,
+      0.989
+    ],
+    "cegar_iters_limit": 39,
+    "cegis_expanded_per_iter": 461
+  },
+  {
+    "thresholds": [
+      0.043,
+      0.987
+    ],
+    "cegar_iters_limit": 1,
+    "cegis_expanded_per_iter": 1
+  },
+  {
+    "thresholds": [
+      0.043,
+      0.988
+    ],
+    "cegar_iters_limit": 1,
+    "cegis_expanded_per_iter": 1
+  },
+  {
+    "thresholds": [
+      0.043,
+      0.989
+    ],
+    "cegar_iters_limit": 49,
+    "cegis_expanded_per_iter": 491
+  },
+  {
+    "thresholds": [
+      0.044,
+      0.987
+    ],
+    "cegar_iters_limit": 1,
+    "cegis_expanded_per_iter": 1
+  },
+  {
+    "thresholds": [
+      0.044,
+      0.988
+    ],
+    "cegar_iters_limit": 1,
+    "cegis_expanded_per_iter": 1
+  },
+  {
+    "thresholds": [
+      0.044,
+      0.989
+    ],
+    "cegar_iters_limit": 43,
+    "cegis_expanded_per_iter": 491
+  }
+]

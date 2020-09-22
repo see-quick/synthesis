@@ -1,10 +1,10 @@
 import json
+import os
 import subprocess
 import sys
 
 PARAMS = {"param": 0, "time": 1, "iters": 2, "sat": 3}
-# CASE_STUDIES = {"grid": "40", "pole": "5", "maze": "50", "dpm": "12", "herman": "2", "bsn": 0}
-CASE_STUDIES = {"grid": "40"}
+CASE_STUDIES = {"grid": "40", "pole": "5", "maze": "50", "dpm": "12", "herman": "6", "bsn": "0"}
 MODES = {1: "threshold", 2: "cegar_iters_limit", 3: "cegis_expanded_per_iter"}
 EXPERIMENT_SCRIPT = "workspace/experiments/experiment.sh"
 LOG_FILE = "workspace/experiments/log_grep.txt"
@@ -42,7 +42,7 @@ def get_name(case_study):
     return case_study.split('-')[0]
 
 
-def call_experiment_script(case_study, mode, method, threshold, cegar_iters_limit, cegis_expanded_per_iter):
+def call_experiment_script(case_study, mode, method, cegar_iters_limit, cegis_expanded_per_iter, *thresholds):
     stop = LIMITS[get_name(case_study)][MODES[mode]][1]
     step = LIMITS[get_name(case_study)][MODES[mode]][2]
     print(
@@ -52,7 +52,8 @@ def call_experiment_script(case_study, mode, method, threshold, cegar_iters_limi
     return subprocess.run(
         [
             "./" + EXPERIMENT_SCRIPT, str(method), str(mode), case_study, CASE_STUDIES[get_name(case_study)],
-            str(threshold), str(cegar_iters_limit), str(cegis_expanded_per_iter), str(stop), str(step)
+            str(cegar_iters_limit), str(cegis_expanded_per_iter), str(stop), str(step),
+            *[str(threshold) for threshold in thresholds]
         ],
         stdout=subprocess.DEVNULL
     )
@@ -65,7 +66,7 @@ def run_experiment_script(case_study, mode, threshold=None, cegar_iters_limit=No
     cegis_expanded_per_iter = cegis_expanded_per_iter if cegis_expanded_per_iter is not None else \
         DEFAULT_LIMITS[get_name(case_study)]["cegis_expanded_per_iter"]
 
-    call_experiment_script(case_study, mode, "research", threshold, cegar_iters_limit, cegis_expanded_per_iter)
+    call_experiment_script(case_study, mode, "research", cegar_iters_limit, cegis_expanded_per_iter, *threshold)
     log_file = open(LOG_FILE, "r")
     log_file.readline()  # skip first empty line
     return log_file
@@ -126,65 +127,116 @@ def load_json(file_name):
         return json.load(fp)
 
 
+def _explore_parameters(thresholds, case_study, property_kind):
+    params = {case_study: {}}
+    params[case_study][property_kind] = []
+
+    for threshold in thresholds:
+        cegar_iters_limit = explore_time_depend_param(case_study + "-" + property_kind, 2, threshold)
+        cegis_expanded_per_iter = explore_time_depend_param(
+            case_study + "-" + property_kind, 3, threshold, cegar_iters_limit
+        )
+        params[case_study][property_kind].append(
+            {
+                "threshold": threshold,
+                "cegar_iters_limit": cegar_iters_limit,
+                "cegis_expanded_per_iter": cegis_expanded_per_iter
+            }
+        )
+        print(
+            f"Found cegar_iters_limit: {cegar_iters_limit} and cegis_expanded_per_iter: {cegis_expanded_per_iter}"
+            f" for threshold {threshold} and {case_study + '-' + property_kind}."
+        )
+    return params
+
+
 def explore_parameters():
-    params = {}
     for case_study in CASE_STUDIES.keys():
-        params[case_study] = {}
+        params = {}
         for property_kind in PROPERTY_KINDS[case_study]:
-            params[case_study][property_kind] = []
             threshold = explore_thresholds(case_study + "-" + property_kind)
-            for threshold in get_thresholds(threshold, property_kind, case_study):
-                cegar_iters_limit = explore_time_depend_param(case_study + "-" + property_kind, 2, threshold)
-                cegis_expanded_per_iter = explore_time_depend_param(
-                    case_study + "-" + property_kind, 3, threshold, cegar_iters_limit
-                )
-                params[case_study][property_kind].append(
-                    {
-                        "threshold": threshold,
-                        "cegar_iters_limit": cegar_iters_limit,
-                        "cegis_expanded_per_iter": cegis_expanded_per_iter
-                    }
-                )
-                print(
-                  f"Found cegar_iters_limit: {cegar_iters_limit} and cegis_expanded_per_iter: {cegis_expanded_per_iter}"
-                  f" for threshold {threshold} and {case_study + '-'  + property_kind}."
-                )
+            params = _explore_parameters(
+                get_thresholds(threshold, property_kind, case_study), case_study, property_kind
+            )
         save_json(params, "workspace/experiments/params/" + case_study + ".json")
-        return
+
+
+def run_multi_experiments(dir_name):
+    for file_name in os.listdir(dir_name):
+        if file_name.endswith("dpm.json"):
+            run_experiments(dir_name + "/" + file_name)
+            print("------------------------------------------------------")
 
 
 def run_experiments(file_name):
     params = load_json(file_name)
     results = {}
-    for name, case_study in params.items():
-        results[name] = {}
-        for property_kind in PROPERTY_KINDS[name]:
-            results[name][property_kind] = {}
-            for params_assignment in case_study[property_kind]:
-                results[name][property_kind][params_assignment["threshold"]] = {}
-                for method in METHODS:
-                    results[name][property_kind][params_assignment["threshold"]][method] = {}
-                    out = subprocess.run(
-                        [
-                            "./" + EXPERIMENT_SCRIPT, method, "0", name + "-" + property_kind, CASE_STUDIES[name],
-                            str(params_assignment["threshold"]),
-                            str(params_assignment["cegar_iters_limit"]),
-                            str(params_assignment["cegis_expanded_per_iter"])
-                        ],
-                        stdout=subprocess.PIPE
-                    )
-                    result = out.stdout.decode("utf-8").strip().split('\n')[-1]
-                    time, iters, sat = [v.strip() for v in result.split(',')]
-                    results[name][property_kind][params_assignment["threshold"]][method]["time"] = round(float(time), 3)
-                    results[name][property_kind][params_assignment["threshold"]][method]["iters"] = iters
-        save_json(results, "workspace/experiments/results/" + name + ".json")
+    name = file_name.split("/")[-1].split(".")[0]
+    results[name] = {}
+    check_sat = 0
+    for params_assignment in params:
+        thresholds = " - ".join(str(threshold) for threshold in params_assignment["thresholds"])
+        results[name][thresholds] = {}
+
+        for method in METHODS:
+            results[name][thresholds][method] = {}
+            out = subprocess.run(
+                [
+                    "./" + EXPERIMENT_SCRIPT, method, "0", name + "-combined", CASE_STUDIES[name],
+                    str(params_assignment["cegar_iters_limit"]), str(params_assignment["cegis_expanded_per_iter"]),
+                    str(0.0), str(1.0), str(params_assignment["thresholds"][0]), str(params_assignment["thresholds"][1])
+                ],
+                stdout=subprocess.PIPE
+            )
+            result = out.stdout.decode("utf-8").strip().split('\n')[-1]
+            time, iters, sat = [v.strip() for v in result.split(',')]
+            results[name][thresholds][method]["time"] = round(float(time), 3)
+            results[name][thresholds][method]["iters"] = iters
+
+            print(f'{name} - {thresholds}: {method}: {time}, {iters}, {sat}')
+            if method == "research":
+                check_sat = sat
+            else:
+                if check_sat != sat:
+                    print(f"The solutions are different: {check_sat} != {sat} for {method}, {params_assignment}.")
+        print()
+
+    save_json(results, "workspace/experiments/multi_results/" + name + ".json")
+
+
+def get_multi_thresholds(t0, t1, case_study):
+    thresholds = []
+    threshold_step = LIMITS[case_study]["threshold"][2]
+    for step0 in range(-1, 2):
+        for step1 in range(-1, 2):
+            thresholds.append((t0 + step0 * threshold_step, t1 + step1 * threshold_step))
+    return thresholds
+
+
+def multi_properties(case_study):
+    params = load_json("workspace/experiments/params/" + case_study + ".json")
+    t0, t1 = 0.0, 0.0
+    for property_kind, values in params[case_study].items():
+        t0 = values[-1]["threshold"] - LIMITS[case_study]["threshold"][2] if property_kind == "liveness" else t0
+        t1 = values[0]["threshold"] + LIMITS[case_study]["threshold"][2] if property_kind == "safety" else t1
+        thresholds = get_multi_thresholds(t0, t1, case_study)
+        result = _explore_parameters(thresholds, case_study, "combined")
+        save_json(result, "workspace/experiments/multi_params/" + case_study + ".json")
 
 
 if __name__ == '__main__':
+    # explore parameters for single properties
     if sys.argv[1] == "0":
         explore_parameters()
+    # run experiments for single properties
     elif sys.argv[1] == "1":
         run_experiments(sys.argv[2])
+    # explore parameters for multiple properties
+    elif sys.argv[1] == "2":
+        multi_properties(sys.argv[2])
+    # run experiments for multiple properties
+    elif sys.argv[1] == "3":
+        run_multi_experiments(sys.argv[2])
     else:
         print("Invalid argument value. The supported values are:\n"
               "0: Explore the value of parameters.\n"

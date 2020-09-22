@@ -9,14 +9,15 @@ secondary_method="lift"
 regime=$2
 
 # hybrid method parameters
-threshold=$5
-cegar_iters_limit=$6
-cegis_expanded_per_iter=$7
+t0=$9
+t1=${10}
+cegar_iters_limit=$5
+cegis_expanded_per_iter=$6
 
 # explore parameters
 t_min=0.00
-t_max=$8
-t_step=$9
+t_max=$7
+t_step=$8
 
 l_min=1
 l_max=50
@@ -44,11 +45,12 @@ function dynasty {
     write_params
     dynasty_opts="--project ${examples_dir}/${model}/ --sketch sketch.templ --allowed sketch.allowed --properties sketch.properties"
     dynasty="python dynasty.py ${dynasty_opts} ${primary_method}"
-    timeout 600s ${dynasty} --constants "CMAX=${cmax},THRESHOLD=${threshold}"
+    timeout 600s ${dynasty} --constants "CMAX=${cmax},T0=${t0},T1=${t1}"
     if [ $? -eq  124 ]
     then
+      echo "Method ${primary_method} reached timeout 600s." >&2
       dynasty="python dynasty.py ${dynasty_opts} ${secondary_method}"
-      timeout 600s ${dynasty} --constants "CMAX=${cmax},THRESHOLD=${threshold}"
+      timeout 600s ${dynasty} --constants "CMAX=${cmax},T0=${t0},T1=${t1}"
     fi
 }
 

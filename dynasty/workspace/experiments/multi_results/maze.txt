@@ -1,0 +1,40 @@
+------------------------------------------------------
+maze - 0.82 - 0.16: research: 0.38, 1 - 0, False
+maze - 0.82 - 0.16: lift: 0.36060285568237305, 1, False
+maze - 0.82 - 0.16: cegis: 12.77499532699585, None, False
+
+maze - 0.82 - 0.17: research: 5.08, 1 - 2, False
+maze - 0.82 - 0.17: lift: 5.461697340011597, 21, True
+The solutions are different: False != True for lift, {'thresholds': [0.82, 0.17], 'cegar_iters_limit': 1, 'cegis_expanded_per_iter': 1}.
+maze - 0.82 - 0.17: cegis: 163.71934628486633, 28, True
+The solutions are different: False != True for cegis, {'thresholds': [0.82, 0.17], 'cegar_iters_limit': 1, 'cegis_expanded_per_iter': 1}.
+
+maze - 0.82 - 0.18: research: 5.18, 7 - 18, True
+maze - 0.82 - 0.18: lift: 5.328485727310181, 20, True
+maze - 0.82 - 0.18: cegis: 55.91215229034424, 12, True
+
+maze - 0.83 - 0.16: research: 0.37, 1 - 0, False
+maze - 0.83 - 0.16: lift: 0.35457897186279297, 1, False
+maze - 0.83 - 0.16: cegis: 12.840744733810425, None, False
+
+maze - 0.83 - 0.17: research: 5.21, 1 - 50, True
+maze - 0.83 - 0.17: lift: 5.454227447509766, 21, True
+Method cegis reached timeout 600s.
+maze - 0.83 - 0.17: cegis: 5.446465015411377, 21, True
+
+maze - 0.83 - 0.18: research: 5.09, 7 - 18, True
+maze - 0.83 - 0.18: lift: 5.518023490905762, 21, True
+Method cegis reached timeout 600s.
+maze - 0.83 - 0.18: cegis: 5.526260614395142, 21, True
+
+maze - 0.84 - 0.16: research: 0.38, 1 - 0, False
+maze - 0.84 - 0.16: lift: 0.35449910163879395, 1, False
+maze - 0.84 - 0.16: cegis: 0.7576687335968018, None, False
+
+maze - 0.84 - 0.17: research: 0.38, 1 - 0, False
+maze - 0.84 - 0.17: lift: 0.35529232025146484, 1, False
+maze - 0.84 - 0.17: cegis: 39.26763153076172, None, False
+
+maze - 0.84 - 0.18: research: 0.38, 1 - 0, False
+maze - 0.84 - 0.18: lift: 0.35117006301879883, 1, False
+maze - 0.84 - 0.18: cegis: 46.79545044898987, None, False
