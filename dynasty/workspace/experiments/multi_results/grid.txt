@@ -1,0 +1,36 @@
+(venv) simon@simacer:~/School/DP/synthesis/dynasty$ python3 workspace/experiments/experiment.py 3 workspace/experiments/multi_params/
+grid - 0.97 - 0.01: research: 0.23, 1 - 2, False
+grid - 0.97 - 0.01: lift: 24.37151837348938, 269, False
+grid - 0.97 - 0.01: cegis: 20.087934732437134, None, False
+
+grid - 0.97 - 0.02: research: 0.88, 1 - 27, True
+grid - 0.97 - 0.02: lift: 14.82170557975769, 159, True
+grid - 0.97 - 0.02: cegis: 1.359755039215088, 33, True
+
+grid - 0.97 - 0.03: research: 1.9, 5 - 22, True
+grid - 0.97 - 0.03: lift: 5.249755144119263, 50, True
+grid - 0.97 - 0.03: cegis: 0.7044191360473633, 18, True
+
+grid - 0.98 - 0.01: research: 0.23, 1 - 2, False
+grid - 0.98 - 0.01: lift: 24.17520022392273, 269, False
+grid - 0.98 - 0.01: cegis: 21.31670618057251, None, False
+
+grid - 0.98 - 0.02: research: 1.03, 1 - 27, True
+grid - 0.98 - 0.02: lift: 15.138368368148804, 159, True
+grid - 0.98 - 0.02: cegis: 1.367380142211914, 33, True
+
+grid - 0.98 - 0.03: research: 1.88, 5 - 22, True
+grid - 0.98 - 0.03: lift: 5.342427492141724, 50, True
+grid - 0.98 - 0.03: cegis: 0.7075691223144531, 18, True
+
+grid - 0.99 - 0.01: research: 0.23, 1 - 2, False
+grid - 0.99 - 0.01: lift: 24.566892385482788, 269, False
+grid - 0.99 - 0.01: cegis: 20.231062650680542, None, False
+
+grid - 0.99 - 0.02: research: 0.24, 1 - 2, False
+grid - 0.99 - 0.02: lift: 27.468008279800415, 297, False
+grid - 0.99 - 0.02: cegis: 20.61352825164795, None, False
+
+grid - 0.99 - 0.03: research: 0.24, 1 - 2, False
+grid - 0.99 - 0.03: lift: 26.856486558914185, 297, False
+grid - 0.99 - 0.03: cegis: 20.064703702926636, None, False

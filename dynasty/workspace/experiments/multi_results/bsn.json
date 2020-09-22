@@ -1,0 +1,130 @@
+{
+  "bsn": {
+    "0.042 - 0.987": {
+      "research": {
+        "time": 0.42,
+        "iters": "1 - 17"
+      },
+      "lift": {
+        "time": 0.141,
+        "iters": "7"
+      },
+      "cegis": {
+        "time": 71.132,
+        "iters": "None"
+      }
+    },
+    "0.042 - 0.988": {
+      "research": {
+        "time": 0.36,
+        "iters": "1 - 17"
+      },
+      "lift": {
+        "time": 0.141,
+        "iters": "7"
+      },
+      "cegis": {
+        "time": 73.123,
+        "iters": "None"
+      }
+    },
+    "0.042 - 0.989": {
+      "research": {
+        "time": 0.14,
+        "iters": "1 - 0"
+      },
+      "lift": {
+        "time": 0.103,
+        "iters": "1"
+      },
+      "cegis": {
+        "time": 69.029,
+        "iters": "None"
+      }
+    },
+    "0.043 - 0.987": {
+      "research": {
+        "time": 0.39,
+        "iters": "1 - 17"
+      },
+      "lift": {
+        "time": 0.14,
+        "iters": "7"
+      },
+      "cegis": {
+        "time": 65.659,
+        "iters": "None"
+      }
+    },
+    "0.043 - 0.988": {
+      "research": {
+        "time": 0.40,
+        "iters": "1 - 17"
+      },
+      "lift": {
+        "time": 0.137,
+        "iters": "7"
+      },
+      "cegis": {
+        "time": 62.106,
+        "iters": "None"
+      }
+    },
+    "0.043 - 0.989": {
+      "research": {
+        "time": 0.13,
+        "iters": "1 - 0"
+      },
+      "lift": {
+        "time": 0.099,
+        "iters": "1"
+      },
+      "cegis": {
+        "time": 61.979,
+        "iters": "None"
+      }
+    },
+    "0.044 - 0.987": {
+      "research": {
+        "time": 0.35,
+        "iters": "1 - 17"
+      },
+      "lift": {
+        "time": 0.12,
+        "iters": "3"
+      },
+      "cegis": {
+        "time": 70.962,
+        "iters": "None"
+      }
+    },
+    "0.044 - 0.988": {
+      "research": {
+        "time": 0.41,
+        "iters": "1 - 17"
+      },
+      "lift": {
+        "time": 0.147,
+        "iters": "3"
+      },
+      "cegis": {
+        "time": 75.345,
+        "iters": "None"
+      }
+    },
+    "0.044 - 0.989": {
+      "research": {
+        "time": 0.16,
+        "iters": "1 - 0"
+      },
+      "lift": {
+        "time": 0.121,
+        "iters": "1"
+      },
+      "cegis": {
+        "time": 71.412,
+        "iters": "None"
+      }
+    }
+  }
+}

@@ -1,0 +1,48 @@
+(venv) simon@simacer:~/School/DP/synthesis/dynasty$ python3 workspace/experiments/experiment.py 3 workspace/experiments/multi_params/
+dpm - 0.007 - 0.981: research: 0.82, 1 - 0, False
+dpm - 0.007 - 0.981: lift: 0.8128609657287598, 1, False
+Method cegis reached timeout 600s.
+dpm - 0.007 - 0.981: cegis: 0.7977912425994873, 1, False
+
+dpm - 0.007 - 0.982: research: 0.82, 1 - 0, False
+dpm - 0.007 - 0.982: lift: 0.7974069118499756, 1, False
+Method cegis reached timeout 600s.
+dpm - 0.007 - 0.982: cegis: 0.8057539463043213, 1, False
+
+dpm - 0.007 - 0.983: research: 0.82, 1 - 0, False
+dpm - 0.007 - 0.983: lift: 0.8091883659362793, 1, False
+Method cegis reached timeout 600s.
+dpm - 0.007 - 0.983: cegis: 0.8089666366577148, 1, False
+
+dpm - 0.008 - 0.981: research: 0.81, 1 - 0, False
+dpm - 0.008 - 0.981: lift: 0.8221960067749023, 1, False
+Method cegis reached timeout 600s.
+dpm - 0.008 - 0.981: cegis: 0.8082540035247803, 1, False
+
+dpm - 0.008 - 0.982: research: 0.82, 1 - 0, False
+dpm - 0.008 - 0.982: lift: 0.8000335693359375, 1, False
+Method cegis reached timeout 600s.
+dpm - 0.008 - 0.982: cegis: 0.8121070861816406, 1, False
+
+dpm - 0.008 - 0.983: research: 0.81, 1 - 0, False
+dpm - 0.008 - 0.983: lift: 0.8012223243713379, 1, False
+Method cegis reached timeout 600s.
+dpm - 0.008 - 0.983: cegis: 0.7988448143005371, 1, False
+
+dpm - 0.009 - 0.981: research: 1.15, 1 - 2, True
+dpm - 0.009 - 0.981: lift: 6.6365296840667725, 17, True
+Method cegis reached timeout 600s.
+dpm - 0.009 - 0.981: cegis: 6.631670713424683, 17, True
+
+dpm - 0.009 - 0.982: research: 1.14, 1 - 2, True
+dpm - 0.009 - 0.982: lift: 6.718314170837402, 17, True
+Method cegis reached timeout 600s.
+dpm - 0.009 - 0.982: cegis: 6.628094673156738, 17, True
+
+dpm - 0.009 - 0.983: research: 1.14, 1 - 2, True
+dpm - 0.009 - 0.983: lift: 6.669725656509399, 17, True
+Method cegis reached timeout 600s.
+dpm - 0.009 - 0.983: cegis: 6.702298164367676, 17, True
+
+------------------------------------------------------
+(venv) simon@simacer:~/School/DP/synthesis/dynasty$
