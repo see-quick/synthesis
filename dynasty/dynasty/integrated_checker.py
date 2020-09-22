@@ -114,6 +114,7 @@ class CEGARChecker(LiftingChecker):
             undecided_indices = \
                 [idx for idx, r in enumerate(threshold_synthesis_results) if r == ThresholdSynthesisResult.UNDECIDED]
             if undecided_indices:
+                self._delete_sat_formulae(undecided_indices)
                 logger.debug("Undecided.")
                 self.new_options = self.cegar_split_option(option, undecided_indices[0])
             else:
@@ -302,8 +303,7 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
 
     def run_feasibility(self):
         """Run feasibility synthesis."""
-        assert not self.input_has_optimality_property()
-        # assert not self.input_has_restrictions()
+        assert not self.input_has_restrictions()
 
         # perform MDP model checking & extract bounds on reachability probability;
         # explore options (DFS) just before reaching the limit of mdp iterations
