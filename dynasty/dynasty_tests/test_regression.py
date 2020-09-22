@@ -13,8 +13,8 @@ benchmarks_feasibility = [
                  "single.properties", "none.restrictions"),
     pytest.param("examples/grid", "4x4grid_sl.templ", "CMAX=11,T_EXP=10.0,T_SLOW=10.0,T_FAST=0.9", "4x4grid_sl.allowed",
                  "single.properties", "none.restrictions"),
-    pytest.param("workspace/examples/pole-live-safe", "sketch.templ", "THRESHOLD_S=0.9,CMAX_S=3,"
-                 "THRESHOLD_L=0.1,CMAX_L=7", "sketch.allowed", "sketch.properties", "none.restrictions")
+    pytest.param("workspace/examples/grid-combined", "sketch.templ", "T0=0.97,T1=0.02,CMAX=40",
+                 "sketch.allowed", "sketch.properties", "none.restrictions")
 ]
 
 methods_feasibility = [
