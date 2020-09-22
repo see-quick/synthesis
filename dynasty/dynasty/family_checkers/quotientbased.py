@@ -59,6 +59,7 @@ class QuotientBasedFamilyChecker(FamilyChecker):
                 opt_alt_formula.set_optimality_type(stormpy.OptimizationDirection.Maximize)
             self.mc_formulae.append(opt_formula)
             self.mc_formulae_alt.append(opt_alt_formula)
+            self.thresholds.append(math.inf if self._optimality_setting.direction == "min" else 0.0)
 
     def _analyse_from_scratch(self, _open_constants, holes_options, all_in_one_constants):
         remember = set()  # set(_open_constants)#set()
@@ -111,6 +112,14 @@ class LiftingChecker(QuotientBasedFamilyChecker):
                     (result == ThresholdSynthesisResult.BELOW) and self._accept_if_above[index]:
                 return True
         return False
+
+    def _delete_sat_formulae(self, undecided):
+        self.mc_formulae = [f for f in self.mc_formulae if self.mc_formulae.index(f) in undecided]
+        self.mc_formulae_alt = [f for f in self.mc_formulae_alt if self.mc_formulae_alt.index(f) in undecided]
+        self.thresholds = [t for t in self.thresholds if self.thresholds.index(t) in undecided]
+        self._accept_if_above = [t for t in self._accept_if_above if self._accept_if_above.index(t) in undecided]
+        assert len(self.mc_formulae) == len(self.mc_formulae_alt) == len(self.thresholds) == \
+            len(self._accept_if_above) == len(undecided)
 
     def run_feasibility(self):
         if self.input_has_optimality_property():

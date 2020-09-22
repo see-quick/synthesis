@@ -143,6 +143,7 @@ class CEGARChecker(LiftingChecker):
             undecided_indices = \
                 [idx for idx, r in enumerate(threshold_synthesis_results) if r == ThresholdSynthesisResult.UNDECIDED]
             if undecided_indices:
+                self._delete_sat_formulae(undecided_indices)
                 logger.debug("Undecided.")
                 self.new_options = self.cegar_split_option(option, undecided_indices[0])
             else:
