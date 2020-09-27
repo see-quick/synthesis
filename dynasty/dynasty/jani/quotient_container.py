@@ -379,11 +379,11 @@ class JaniQuotientContainer:
         # That is inefficient for now as we need it just for this single task, but
         # I guess we will use it multiple times.
 
-    def decided(self, formulae, thresholds):
-        assert len(formulae) == len(thresholds) == len(self._latest_results)
+    def decided(self, thresholds):
+        assert len(thresholds) == len(self._latest_results)
 
         decisions = []
-        for latest_result, formula, threshold in (zip(self._latest_results, formulae, thresholds)):
+        for latest_result, threshold in (zip(self._latest_results, thresholds)):
             logger.debug(
                 f"Absolute minimum: {latest_result.absolute_min}, "
                 f"Absolute maximum {latest_result.absolute_max}, "

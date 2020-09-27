@@ -135,7 +135,7 @@ class CEGARChecker(LiftingChecker):
         logger.info(f"CEGAR: iteration {self.iterations}, analysing option {option}.")
         self._analyse_option(option)
 
-        threshold_synthesis_results = self.oracle.decided(self.mc_formulae, self.thresholds)
+        threshold_synthesis_results = self.oracle.decided(self.thresholds)
 
         if self._contains_unsat_result(threshold_synthesis_results):
             logger.debug("Unsatisfying.")
