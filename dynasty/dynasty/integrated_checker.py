@@ -106,7 +106,7 @@ class CEGARChecker(LiftingChecker):
         logger.info(f"CEGAR: iteration {self.iterations}, analysing option {option}.")
         self._analyse_option(option)
 
-        threshold_synthesis_results = self.oracle.decided(self.mc_formulae, self.thresholds)
+        threshold_synthesis_results = self.oracle.decided(self.thresholds)
 
         if self._contains_unsat_result(threshold_synthesis_results):
             logger.debug("Unsatisfying.")
@@ -252,7 +252,8 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         self._initialize_solver()
 
         # Prepare counter-example generator for each given property
-        assert len(self.properties) == len(mdp_results)
+        # TODO: Temporary ignore until will implement optimal synthesis for integrated method
+        # assert len(self.properties) == len(mdp_results)
         counterexamples = []
         for prop, mdp_result in zip(self.properties, mdp_results):
             counterexamples.append(stormpy.SynthesisResearchCounterexample(

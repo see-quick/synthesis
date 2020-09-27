@@ -22,12 +22,15 @@ class QuotientBasedFamilyChecker(FamilyChecker):
         self.mc_formulae = None
         self.mc_formulae_alt = None
         self.jani_quotient_builder = None
-        self.thresholds = []
-        self._accept_if_above = []
+        self.thresholds = None
+        self._accept_if_above = None
 
     def initialise(self):
         self.mc_formulae = []
         self.mc_formulae_alt = []
+        self.thresholds = []
+        self._accept_if_above = []
+
         for p in self.properties:
             formula = p.raw_formula.clone()
             self.thresholds.append(formula.threshold)
@@ -47,6 +50,7 @@ class QuotientBasedFamilyChecker(FamilyChecker):
             self.mc_formulae_alt.append(alt_formula)
             self._accept_if_above.append(accept_if_above)
 
+    def _set_optimality_setting(self):
         if self._optimality_setting is not None:
             opt_formula = self._optimality_setting.criterion.raw_formula.clone()
             opt_alt_formula = self._optimality_setting.criterion.raw_formula.clone()
@@ -57,9 +61,10 @@ class QuotientBasedFamilyChecker(FamilyChecker):
                 assert self._optimality_setting.direction == "min"
                 opt_formula.set_optimality_type(stormpy.OptimizationDirection.Minimize)
                 opt_alt_formula.set_optimality_type(stormpy.OptimizationDirection.Maximize)
-            self.mc_formulae.append(opt_formula)
-            self.mc_formulae_alt.append(opt_alt_formula)
-            self.thresholds.append(math.inf if self._optimality_setting.direction == "min" else 0.0)
+            self.mc_formulae = [opt_formula]
+            self.mc_formulae_alt = [opt_alt_formula]
+            self.thresholds = [math.inf if self._optimality_setting.direction == "min" else 0.0]
+            self._accept_if_above = [self._optimality_setting.direction == "max"]
 
     def _analyse_from_scratch(self, _open_constants, holes_options, all_in_one_constants):
         remember = set()  # set(_open_constants)#set()
@@ -67,7 +72,7 @@ class QuotientBasedFamilyChecker(FamilyChecker):
         jani_abstraction_result.prepare(self.mc_formulae, self.mc_formulae_alt, self._engine)
         for index, threshold in enumerate(self.thresholds):
             logger.info("Run analysis of property with index {}".format(index))
-            jani_abstraction_result.analyse(self.thresholds[index], index, self._engine)
+            jani_abstraction_result.analyse(threshold, index, self._engine)
         return jani_abstraction_result
 
     def _analyse_sub_options(self, oracle, sub_options):
@@ -121,18 +126,23 @@ class LiftingChecker(QuotientBasedFamilyChecker):
         assert len(self.mc_formulae) == len(self.mc_formulae_alt) == len(self.thresholds) == \
             len(self._accept_if_above) == len(undecided)
 
+    @staticmethod
+    def _get_new_options(nr_options_remaining, hole_options):
+        return nr_options_remaining - hole_options[0].size(), hole_options[1:]
+
     def run_feasibility(self):
-        if self.input_has_optimality_property():
-            return self._run_optimal_feasibility()
         if self.input_has_restrictions():
             raise RuntimeError("Restrictions are not supported by quotient based approaches")
 
         self.jani_quotient_builder = JaniQuotientBuilder(self.sketch, self.holes)
         self._open_constants = self.holes
 
-        oracle = None
-        iterations = 0
+        oracle, optimal_hole_option = None, None
+        iterations, optimal_iterations = 0, 0
+        optimal_value = 0.0
         hole_options_next_round = []
+        sat = False
+
         hole_options = [self.hole_options]
         nr_options_remaining = self.hole_options.size()
         logger.info(f"Total number of options: {self.hole_options.size()}")
@@ -144,16 +154,29 @@ class LiftingChecker(QuotientBasedFamilyChecker):
 
             if self._contains_unsat_result(threshold_synthesis_results):
                 logger.debug("Unsatisfying.")
-                nr_options_remaining -= hole_options[0].size()
-                hole_options = hole_options[1:]
+                nr_options_remaining, hole_options = self._get_new_options(nr_options_remaining, hole_options)
             else:
-                if any(r == ThresholdSynthesisResult.UNDECIDED for r in threshold_synthesis_results):
+                undecided_indices = [
+                    idx for idx, r in enumerate(threshold_synthesis_results) if r == ThresholdSynthesisResult.UNDECIDED
+                ]
+                if undecided_indices:
+                    self._delete_sat_formulae(undecided_indices)
                     logger.debug("Undecided.")
                     oracle.scheduler_color_analysis()
                     hole_options = self._split_hole_options(hole_options[0], oracle) + hole_options[1:]
                 else:
                     logger.debug("Satisfying.")
-                    return True, hole_options[0].pick_one_in_family(), None, iterations
+                    if self.input_has_optimality_property():
+                        sat, hole_option, value, iters = self._run_optimal_feasibility(hole_options[0])
+                        if (self._optimality_setting.direction == "max" and value > optimal_value) or \
+                                (self._optimality_setting.direction == "min" and value < optimal_value):
+                            optimal_value = value
+                            optimal_hole_option = hole_option
+                            optimal_iterations = iters
+                        nr_options_remaining, hole_options = self._get_new_options(nr_options_remaining, hole_options)
+                        self.initialise()
+                    else:
+                        return True, hole_options[0].pick_one_in_family(), None, iterations
 
                 next_round = self._check_next_round(oracle, hole_options, hole_options_next_round, nr_options_remaining)
                 if bool(next_round):
@@ -161,92 +184,67 @@ class LiftingChecker(QuotientBasedFamilyChecker):
                 elif next_round is not None:
                     hole_options, hole_options_next_round = hole_options_next_round, []
 
-        return False, None, None, iterations
+        return (sat, optimal_hole_option, optimal_value, optimal_iterations + iterations) \
+            if self.input_has_optimality_property() else (False, None, None, iterations)
 
-    def _run_optimal_feasibility(self):
+    def _run_optimal_feasibility(self, hole_option):
         """
 
         :return:
         """
-        self.jani_quotient_builder = JaniQuotientBuilder(self.sketch, self.holes)
-        self._open_constants = self.holes
-
-        oracle = None
+        oracle, optimal_hole_options = None, None
         iterations = 0
+
+        hole_options = [hole_option]
         hole_options_next_round = []
-        hole_options = [self.hole_options]
         nr_options_remaining = self.hole_options.size()
         logger.info(f"Total number of options: {nr_options_remaining}")
-        self.thresholds.append(math.inf if self._optimality_setting.direction == "min" else 0.0)
-        optimal_hole_options = None
+        self._set_optimality_setting()
+        is_max = self._optimality_setting.direction == "max"
 
         while True:
-            iterations, oracle, threshold_synthesis_result = self._perform_analysis(
+            iterations, oracle, threshold_synthesis_results = self._perform_analysis(
                 iterations, hole_options, hole_options_next_round, oracle
             )
 
-            if threshold_synthesis_result == dynasty.jani.quotient_container.ThresholdSynthesisResult.UNDECIDED:
+            if threshold_synthesis_results[0] == dynasty.jani.quotient_container.ThresholdSynthesisResult.UNDECIDED:
                 logger.debug("Undecided.")
                 improved = False
                 if hole_options[0].size() > 1:
                     oracle.scheduler_color_analysis()
-                    if oracle.is_lower_bound_tight() and self._optimality_setting.direction == "min":
-                        logger.debug("Found a tight lower bound.")
-                        self.thresholds[0] = oracle.lower_bound()
-                        logger.info(f"current threshold {self.thresholds[0]}")
-                        improved = True
-
-                    elif oracle.is_upper_bound_tight() and self._optimality_setting.direction == "max":
-                        logger.debug("Found a tight upper bound.")
-                        self.thresholds[0] = oracle.upper_bound()
+                    if (oracle.is_lower_bound_tight() and not is_max) or (oracle.is_upper_bound_tight() and is_max):
+                        logger.debug(f'Found a tight {"upper" if is_max else "lower"} bound.')
+                        self.thresholds[0] = oracle.upper_bound() if is_max else oracle.lower_bound()
                         logger.info(f"current threshold {self.thresholds[0]}")
                         improved = True
 
                     if improved:
                         nr_options_remaining -= 1 if optimal_hole_options is not None else 0
                         optimal_hole_options = hole_options[0]
-                        nr_options_remaining -= hole_options[0].size()
-                        hole_options = hole_options[1:]
+                        nr_options_remaining, hole_options = self._get_new_options(nr_options_remaining, hole_options)
                     else:
                         hole_options = self._split_hole_options(hole_options[0], oracle) + hole_options[1:]
                 else:
                     hole_options = hole_options[1:]
 
             else:
-                improved_tight = False
-                improved_untight = False
-                if threshold_synthesis_result == ThresholdSynthesisResult.ABOVE and \
-                        self._optimality_setting.direction == "max":
-                    logger.debug("All above.")
+                improved_tight = None
+                if (threshold_synthesis_results[0] == ThresholdSynthesisResult.ABOVE and is_max) or \
+                        (threshold_synthesis_results[0] == ThresholdSynthesisResult.BELOW and not is_max):
+                    logger.debug(f'All {"above" if is_max else "below"}.')
                     oracle.scheduler_color_analysis()
-                    if oracle.is_upper_bound_tight():
-                        improved_tight = True
-                        self.thresholds[0] = oracle.upper_bound()
-                    else:
-                        improved_untight = True
-                        self.thresholds[0] = oracle.lower_bound()
-
-                elif threshold_synthesis_result == ThresholdSynthesisResult.BELOW and \
-                        self._optimality_setting.direction == "min":
-                    logger.debug("All below.")
-                    oracle.scheduler_color_analysis()
-                    if oracle.is_lower_bound_tight():
-                        improved_tight = True
-                        self.thresholds[0] = oracle.lower_bound()
-                    else:
-                        improved_untight = True
-                        self.thresholds[0] = oracle.upper_bound()
+                    improved_tight = oracle.is_upper_bound_tight() if is_max else oracle.is_lower_bound_tight()
+                    self.thresholds[0] = oracle.upper_bound() if \
+                        (improved_tight and is_max) or (not improved_tight and not is_max) else oracle.lower_bound()
                     logger.info(f"current threshold {self.thresholds[0]}")
                 else:
                     logger.debug("All discarded.")
-                    nr_options_remaining -= hole_options[0].size()
-                    hole_options = hole_options[1:]
+                    nr_options_remaining, hole_options = self._get_new_options(nr_options_remaining, hole_options)
 
                 if improved_tight:
-                    nr_options_remaining -= hole_options[0].size()
                     optimal_hole_options = hole_options[0]
-                    hole_options = hole_options[1:]
-                elif improved_untight:
+                    nr_options_remaining, hole_options = self._get_new_options(nr_options_remaining, hole_options)
+                elif improved_tight is not None:
                     optimal_hole_options = None
                     hole_options = self._split_hole_options(hole_options[0], oracle) + hole_options[1:]
 
@@ -258,6 +256,8 @@ class LiftingChecker(QuotientBasedFamilyChecker):
 
             logger.info(f"Optimal value at {self.thresholds[0]} with {optimal_hole_options}")
 
+        return True, optimal_hole_options.pick_one_in_family(), self.thresholds[0], iterations
+
     def _perform_analysis(self, iterations, hole_options, hole_options_next_round, oracle):
         iterations += 1
         logger.info(
@@ -267,7 +267,7 @@ class LiftingChecker(QuotientBasedFamilyChecker):
             oracle = self._analyse_from_scratch(self._open_constants, hole_options[0], set())
         else:
             self._analyse_sub_options(oracle, hole_options[0])
-        return iterations, oracle, oracle.decided(self.mc_formulae, self.thresholds)
+        return iterations, oracle, oracle.decided(self.thresholds)
 
     def run_partitioning(self):
         """
@@ -456,7 +456,7 @@ class AllInOneChecker(QuotientBasedFamilyChecker):
         if self.input_has_multiple_properties():
             raise RuntimeError("All-in-one with optimal feasibility is only implemented for single properties")
         quotient_container = self.get_quotient_container()
-        obtained_bound = quotient_container.lower_bound() if self._optimality_setting.direction == "min" else\
+        obtained_bound = quotient_container.lower_bound() if self._optimality_setting.direction == "min" else \
             quotient_container.upper_bound()
         return True, None, obtained_bound
 
@@ -522,8 +522,7 @@ class ConsistentSchedChecker(QuotientBasedFamilyChecker):
         self.jani_quotient_builder = JaniQuotientBuilder(self.sketch, self.holes)
         self._open_constants = self.holes
         if mode == 1:
-            # threshold will be optimal value
-            self.thresholds.append(math.inf if self._optimality_setting.direction == "min" else 0.0)
+            self._set_optimality_setting()
 
         iterations = 0
 
@@ -550,7 +549,7 @@ class ConsistentSchedChecker(QuotientBasedFamilyChecker):
             self._analyse_sub_options(oracle, selected_hole_option)
             if mode == 0:
                 # Plain feasibility checking.
-                threshold_synthesis_results = oracle.decided(self.mc_formulae, self.thresholds)
+                threshold_synthesis_results = oracle.decided(self.thresholds)
                 for index, result in enumerate(threshold_synthesis_results):
                     if result == ThresholdSynthesisResult.ABOVE and self._accept_if_above[index]:
                         if index == len(threshold_synthesis_results) - 1:
@@ -562,7 +561,7 @@ class ConsistentSchedChecker(QuotientBasedFamilyChecker):
                         break
             elif mode == 1:
                 # Optimal feasibility checking.
-                threshold_synthesis_result = oracle.decided(self.mc_formulae, self.thresholds)
+                threshold_synthesis_result = oracle.decided(self.thresholds)
                 if threshold_synthesis_result == ThresholdSynthesisResult.ABOVE and \
                         self._optimality_setting.direction == "max":
                     self.thresholds[0] = oracle.upper_bound()
@@ -572,7 +571,7 @@ class ConsistentSchedChecker(QuotientBasedFamilyChecker):
                     self.thresholds[0] = oracle.lower_bound()
                     best_result = selected_hole_option.pick_one_in_family()
             elif mode == 2:
-                threshold_synthesis_result = oracle.decided(self.mc_formulae, self.thresholds)
+                threshold_synthesis_result = oracle.decided(self.thresholds)
                 if threshold_synthesis_result == ThresholdSynthesisResult.ABOVE:
                     above.append(selected_hole_option)
                 if threshold_synthesis_result == ThresholdSynthesisResult.BELOW:
