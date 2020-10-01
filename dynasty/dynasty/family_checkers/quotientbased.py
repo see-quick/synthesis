@@ -75,7 +75,9 @@ class QuotientBasedFamilyChecker(FamilyChecker):
             jani_abstraction_result.analyse(threshold, index, self._engine)
         return jani_abstraction_result
 
-    def _analyse_sub_options(self, oracle, sub_options):
+    def _analyse_sub_options(self, oracle, sub_options, update_oracle=False):
+        if update_oracle:
+            oracle.prepare(self.mc_formulae, self.mc_formulae_alt, self._engine)
         indexed_sub_options = self.hole_options.index_map(sub_options)
         oracle.consider_subset(sub_options, indexed_sub_options)
         oracle._latest_results = []
@@ -141,7 +143,7 @@ class LiftingChecker(QuotientBasedFamilyChecker):
         iterations, optimal_iterations = 0, 0
         optimal_value = 0.0
         hole_options_next_round = []
-        sat = False
+        update_oracle_setting, sat = False, False
 
         hole_options = [self.hole_options]
         nr_options_remaining = self.hole_options.size()
@@ -149,8 +151,9 @@ class LiftingChecker(QuotientBasedFamilyChecker):
 
         while True and nr_options_remaining:
             iterations, oracle, threshold_synthesis_results = self._perform_analysis(
-                iterations, hole_options, hole_options_next_round, oracle
+                iterations, hole_options, hole_options_next_round, oracle, update_oracle_setting
             )
+            update_oracle_setting = False
 
             if self._contains_unsat_result(threshold_synthesis_results):
                 logger.debug("Unsatisfying.")
@@ -160,7 +163,7 @@ class LiftingChecker(QuotientBasedFamilyChecker):
                     idx for idx, r in enumerate(threshold_synthesis_results) if r == ThresholdSynthesisResult.UNDECIDED
                 ]
                 if undecided_indices:
-                    self._delete_sat_formulae(undecided_indices)
+                    # self._delete_sat_formulae(undecided_indices)
                     logger.debug("Undecided.")
                     oracle.scheduler_color_analysis()
                     hole_options = self._split_hole_options(hole_options[0], oracle) + hole_options[1:]
@@ -174,7 +177,13 @@ class LiftingChecker(QuotientBasedFamilyChecker):
                             optimal_hole_option = hole_option
                             optimal_iterations = iters
                         nr_options_remaining, hole_options = self._get_new_options(nr_options_remaining, hole_options)
+
+                        self.properties.append(self._optimality_setting.get_violation_property(
+                            optimal_value,
+                            lambda x: self.sketch.expression_manager.create_rational(stormpy.Rational(x))
+                        ))
                         self.initialise()
+                        update_oracle_setting = True
                     else:
                         return True, hole_options[0].pick_one_in_family(), None, iterations
 
@@ -207,7 +216,7 @@ class LiftingChecker(QuotientBasedFamilyChecker):
                 iterations, hole_options, hole_options_next_round, oracle
             )
 
-            if threshold_synthesis_results[0] == dynasty.jani.quotient_container.ThresholdSynthesisResult.UNDECIDED:
+            if threshold_synthesis_results[0] == ThresholdSynthesisResult.UNDECIDED:
                 logger.debug("Undecided.")
                 improved = False
                 if hole_options[0].size() > 1:
@@ -258,7 +267,7 @@ class LiftingChecker(QuotientBasedFamilyChecker):
 
         return True, optimal_hole_options.pick_one_in_family(), self.thresholds[0], iterations
 
-    def _perform_analysis(self, iterations, hole_options, hole_options_next_round, oracle):
+    def _perform_analysis(self, iterations, hole_options, hole_options_next_round, oracle, update_oracle=False):
         iterations += 1
         logger.info(
             f"Start with iteration {iterations} (queue length: {len(hole_options)} + {len(hole_options_next_round)})."
@@ -266,7 +275,7 @@ class LiftingChecker(QuotientBasedFamilyChecker):
         if oracle is None:
             oracle = self._analyse_from_scratch(self._open_constants, hole_options[0], set())
         else:
-            self._analyse_sub_options(oracle, hole_options[0])
+            self._analyse_sub_options(oracle, hole_options[0], update_oracle)
         return iterations, oracle, oracle.decided(self.thresholds)
 
     def run_partitioning(self):
