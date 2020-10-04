@@ -87,6 +87,7 @@ class Statistic:
         self.result = assignment is not None
         self.assignment = {k: v.__str__() for (k, v) in assignment.items()} if assignment is not None else None
         self.iterations = iterations
+        self.optimal_value = optimal_value
 
     def __str__(self):
         is_feasible = "feasible" if self.result else  "unfeasible"
@@ -100,7 +101,7 @@ class CEGISChecker(Synthesiser):
 
     def run(self):
         _, assignment, _ = self.run_feasibility()
-        self.statistic.finished(assignment, self.stats.iterations)
+        self.statistic.finished(assignment, self.stats.iterations, None)
 
 
 class CEGARChecker(LiftingChecker):
@@ -109,16 +110,22 @@ class CEGARChecker(LiftingChecker):
         super().__init__(*args, **kwargs)
         self.statistic = Statistic("CEGAR")
         self.iterations = 0
+        self.optimal_iterations = 0
         self.threshold = 0
+        self.optimal_value = 0.0
         self.use_oracle = True
+        self.update_oracle = 0
+        self.origin_properties = 0
         self.new_options = None
         self.satisfying_assignment = None
         self.oracle = None
+        self.optimal_option = None
 
     def cegar_initialisation(self):
         self.jani_quotient_builder = JaniQuotientBuilder(self.sketch, self.holes)
         self._open_constants = self.holes
-        return [self.hole_options]
+        self.origin_properties = len(self.properties)
+        return [(self.hole_options, [True] * len(self.mc_formulae))]
 
     def cegar_split_option(self, option, index=0):
         self.oracle.scheduler_color_analysis(index)
@@ -128,10 +135,18 @@ class CEGARChecker(LiftingChecker):
         if self.oracle is None:
             self.oracle = LiftingChecker._analyse_from_scratch(self, self._open_constants, option, set())
         else:
-            LiftingChecker._analyse_sub_options(self, self.oracle, option)
+            LiftingChecker._analyse_sub_options(self, self.oracle, option, self.update_oracle)
+            self.update_oracle = 2 if self.update_oracle == 1 else self.update_oracle
 
-    def cegar_analyse_option(self, option):
+    def cegar_analyse_option(self, option_map):
+        option, undecided_formulae = option_map
         self.iterations += 1
+        is_max = self._optimality_setting.direction == "max" if self.input_has_optimality_property() else None
+
+        self.copy_formulae_attrs()
+        self._delete_sat_formulae([idx for idx, uf in enumerate(undecided_formulae) if uf])
+        undecided_indices = list(range(0, len(self.mc_formulae)))
+
         logger.info(f"CEGAR: iteration {self.iterations}, analysing option {option}.")
         self._analyse_option(option)
 
@@ -143,35 +158,75 @@ class CEGARChecker(LiftingChecker):
             undecided_indices = \
                 [idx for idx, r in enumerate(threshold_synthesis_results) if r == ThresholdSynthesisResult.UNDECIDED]
             if undecided_indices:
-                self._delete_sat_formulae(undecided_indices)
                 logger.debug("Undecided.")
                 self.new_options = self.cegar_split_option(option, undecided_indices[0])
             else:
-                logger.debug("Satisfying.")
-                self.satisfying_assignment = option.pick_one_in_family()
+                if self.input_has_optimality_property():
+                    sat, candidate_option, value, iters = self._run_optimal_feasibility(option)
+                    if (is_max and value > self.optimal_value) or (not is_max and value < self.optimal_value):
+                        self.optimal_value = value
+                        self.optimal_option = candidate_option
+                        self.optimal_iterations = iters
+
+                    violation_property = self._optimality_setting.get_violation_property(
+                        self.optimal_value,
+                        lambda x: self.sketch.expression_manager.create_rational(stormpy.Rational(x)),
+                        self.sketch
+                    )
+
+                    if self.origin_properties == len(self.properties):
+                        self.properties.append(violation_property)
+                    elif self.origin_properties + 1 == len(self.properties):
+                        self.properties[len(self.properties) - 1] = violation_property
+                    else:
+                        assert False
+
+                    self.initialise()
+                    self.update_oracle = 1
+                else:
+                    logger.debug("Satisfying.")
+                    self.satisfying_assignment = option.pick_one_in_family()
+
+        checked_formula = 0
+        for idx, formula in enumerate(undecided_formulae):
+            if formula:
+                undecided_formulae[idx] = checked_formula in undecided_indices
+                checked_formula += 1
+
+        return undecided_formulae
+
+    def perform_iteration(self, hole_options_map):
+        undecided_formulae = self.cegar_analyse_option(hole_options_map.pop(0))
+        if self.new_options is not None:
+            self.new_options = [(new_option, undecided_formulae[:]) for new_option in self.new_options]
+            hole_options_map = self.new_options + hole_options_map
+            self.new_options = None
+        if self.update_oracle == 1:
+            hole_options_map = \
+                [(option, formulae + [True]) for (option, formulae) in hole_options_map]
+        return hole_options_map
 
     def run_feasibility(self):
-        if self.input_has_optimality_property():
-            return self._run_optimal_feasibility()
         if self.input_has_restrictions():
             raise RuntimeError("Restrictions are not supported by quotient based approaches")
 
-        hole_options = self.cegar_initialisation()
+        hole_options_map = self.cegar_initialisation()
 
-        while len(hole_options) > 0:
-            option = hole_options.pop(0)
-            self.cegar_analyse_option(option)
+        while len(hole_options_map) > 0:
+            hole_options_map = self.perform_iteration(hole_options_map)
             if self.satisfying_assignment is not None:
                 return self.satisfying_assignment
-            if self.new_options is not None:
-                hole_options = self.new_options + hole_options
+
+        if self.input_has_optimality_property():
+            self.iterations += self.optimal_iterations
+            return self.optimal_option
 
         logger.info("No more options to explore.")
         return None
 
     def run(self):
         assignment = self.run_feasibility()
-        self.statistic.finished(assignment, self.iterations)
+        self.statistic.finished(assignment, self.iterations, self.optimal_value)
 
 
 class IntegratedStatistic(Statistic):
@@ -227,7 +282,7 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         self.cegis_iterations = 0
         self.cegar_iterations = 0
         self.statistic = IntegratedStatistic()
-        self.mdp = None
+        self.mdp, self.violation_mdp = None, None
         self.mdp_mc_results = []
         self.allowed_to_split_options = True
 
@@ -246,13 +301,16 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         if self.satisfying_assignment is not None:
             logger.info("Found satisfying assignment.")
             return self.satisfying_assignment
-        if len(hole_options) == 0:
+        elif self.optimal_option is not None:
+            self.cegar_iterations += self.optimal_iterations
+            return self.optimal_option
+        elif len(hole_options) == 0:
             logger.info("No more options.")
             return None
 
     def cegar_analyse_option(self, option):
         """Analyse region and store mdp data."""
-        CEGARChecker.cegar_analyse_option(self, option)
+        undecided_formulae = CEGARChecker.cegar_analyse_option(self, option)
         self.cegar_iterations += 1
         self.mdp = self.oracle._mdp_handling.mdp
         self.mdp_mc_result = self.oracle._latest_result.result
@@ -606,7 +664,10 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         self.ce_quality_init()
         
         # precompute DTMC builder options
-        builder_options = stormpy.BuilderOptions([p.raw_formula for p in self.properties])
+        raw_formulae = [p.property.raw_formula for p in self.properties]
+        if self.input_has_optimality_property():
+            raw_formulae.append(self._optimality_setting.criterion.raw_formula)
+        builder_options = stormpy.BuilderOptions(raw_formulae)
         builder_options.set_build_with_choice_origins(True)
         builder_options.set_build_state_valuations(True)
         # builder_options.set_add_overlapping_guards_label() #?

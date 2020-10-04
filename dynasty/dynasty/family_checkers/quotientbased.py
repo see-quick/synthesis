@@ -19,21 +19,21 @@ logger = logging.getLogger(__file__)
 class QuotientBasedFamilyChecker(FamilyChecker):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.mc_formulae = None
-        self.mc_formulae_alt = None
+        self.mc_formulae, self._mc_formulae = None, None
+        self.mc_formulae_alt, self._mc_formulae_alt = None, None
         self.jani_quotient_builder = None
-        self.thresholds = None
-        self._accept_if_above = None
+        self.thresholds, self._thresholds = None, None
+        self._accept_if_above, self.__accept_if_above = None, None
 
     def initialise(self):
-        self.mc_formulae = []
-        self.mc_formulae_alt = []
-        self.thresholds = []
-        self._accept_if_above = []
+        self._mc_formulae = []
+        self._mc_formulae_alt = []
+        self._thresholds = []
+        self.__accept_if_above = []
 
         for p in self.properties:
             formula = p.raw_formula.clone()
-            self.thresholds.append(formula.threshold)
+            self._thresholds.append(formula.threshold)
             formula.remove_bound()
             alt_formula = formula.clone()
             if formula.comparison_type in [stormpy.ComparisonType.LESS, stormpy.ComparisonType.LEQ]:
@@ -46,9 +46,16 @@ class QuotientBasedFamilyChecker(FamilyChecker):
                 alt_formula.set_optimality_type(stormpy.OptimizationDirection.Minimize)
                 accept_if_above = True
 
-            self.mc_formulae.append(formula)
-            self.mc_formulae_alt.append(alt_formula)
-            self._accept_if_above.append(accept_if_above)
+            self._mc_formulae.append(formula)
+            self._mc_formulae_alt.append(alt_formula)
+            self.__accept_if_above.append(accept_if_above)
+        self.copy_formulae_attrs()
+
+    def copy_formulae_attrs(self):
+        self.mc_formulae = self._mc_formulae[:]
+        self.mc_formulae_alt = self._mc_formulae_alt[:]
+        self.thresholds = self._thresholds[:]
+        self._accept_if_above = self.__accept_if_above[:]
 
     def _set_optimality_setting(self):
         if self._optimality_setting is not None:
@@ -163,7 +170,6 @@ class LiftingChecker(QuotientBasedFamilyChecker):
                     idx for idx, r in enumerate(threshold_synthesis_results) if r == ThresholdSynthesisResult.UNDECIDED
                 ]
                 if undecided_indices:
-                    # self._delete_sat_formulae(undecided_indices)
                     logger.debug("Undecided.")
                     oracle.scheduler_color_analysis()
                     hole_options = self._split_hole_options(hole_options[0], oracle) + hole_options[1:]
@@ -192,7 +198,6 @@ class LiftingChecker(QuotientBasedFamilyChecker):
                     break
                 elif next_round is not None:
                     hole_options, hole_options_next_round = hole_options_next_round, []
-
         return (sat, optimal_hole_option, optimal_value, optimal_iterations + iterations) \
             if self.input_has_optimality_property() else (False, None, None, iterations)
 
