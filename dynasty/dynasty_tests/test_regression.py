@@ -54,15 +54,13 @@ def test_feasibility_script(project, sketch, constants, allowed, properties, res
 
 benchmarks_optimal_feasibility = [
     pytest.param("examples/grid", "4x4grid_sl.templ", "CMAX=11,T_EXP=10.0,T_SLOW=10.0,T_FAST=0.7", "4x4grid_sl.allowed",
-                 "none.properties", "none.restrictions", "fast_to_target.optimal"),
+                 "single.properties", "none.restrictions", "fast_to_target.optimal"),
 ]
-
-methods_optimal_feasibility = methods_feasibility[:-1]
 
 
 @pytest.mark.parametrize("project,sketch,constants,allowed,properties,restrictions,optimal",
                          benchmarks_optimal_feasibility)
-@pytest.mark.parametrize("method", methods_optimal_feasibility)
+@pytest.mark.parametrize("method", methods_feasibility)
 def test_optimal_feasibility_script(project, sketch, constants, allowed, properties, restrictions, optimal, method):
     command = ["--project",
                project,
