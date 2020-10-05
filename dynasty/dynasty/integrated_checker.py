@@ -141,32 +141,14 @@ class CEGARChecker(LiftingChecker):
                         self.optimal_option = candidate_option
                         self.optimal_iterations = iters
 
-                    violation_property = self._optimality_setting.get_violation_property(
-                        self.optimal_value,
-                        lambda x: self.sketch.expression_manager.create_rational(stormpy.Rational(x)),
-                        self.sketch
-                    )
-
-                    if self.origin_properties == len(self.properties):
-                        self.properties.append(violation_property)
-                    elif self.origin_properties + 1 == len(self.properties):
-                        self.properties[len(self.properties) - 1] = violation_property
-                    else:
-                        assert False
-
+                    self._construct_violation_property(self.optimal_value, self.origin_properties)
                     self.initialise()
                     self.update_oracle = 1
                 else:
                     logger.debug("Satisfying.")
                     self.satisfying_assignment = option.pick_one_in_family()
 
-        checked_formula = 0
-        for idx, formula in enumerate(undecided_formulae):
-            if formula:
-                undecided_formulae[idx] = checked_formula in undecided_indices
-                checked_formula += 1
-
-        return undecided_formulae
+        return self._get_undecided_formulae(undecided_formulae, undecided_indices)
 
     def perform_iteration(self, hole_options_map):
         undecided_formulae = self.cegar_analyse_option(hole_options_map.pop(0))
