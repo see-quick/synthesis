@@ -128,16 +128,43 @@ class LiftingChecker(QuotientBasedFamilyChecker):
         return False
 
     def _delete_sat_formulae(self, undecided):
-        self.mc_formulae = [f for f in self.mc_formulae if self.mc_formulae.index(f) in undecided]
-        self.mc_formulae_alt = [f for f in self.mc_formulae_alt if self.mc_formulae_alt.index(f) in undecided]
-        self.thresholds = [t for t in self.thresholds if self.thresholds.index(t) in undecided]
-        self._accept_if_above = [t for t in self._accept_if_above if self._accept_if_above.index(t) in undecided]
+        self.mc_formulae = [f for i, f in enumerate(self.mc_formulae) if i in undecided]
+        self.mc_formulae_alt = [f for i, f in enumerate(self.mc_formulae_alt) if i in undecided]
+        self.thresholds = [t for i, t in enumerate(self.thresholds) if i in undecided]
+        self._accept_if_above = [t for i, t in enumerate(self._accept_if_above) if i in undecided]
         assert len(self.mc_formulae) == len(self.mc_formulae_alt) == len(self.thresholds) == \
             len(self._accept_if_above) == len(undecided)
+
+    def _construct_violation_property(self, optimal_value, origin_properties):
+        violation_property = self._optimality_setting.get_violation_property(
+            optimal_value,
+            lambda x: self.sketch.expression_manager.create_rational(stormpy.Rational(x)),
+            self.sketch
+        )
+
+        if origin_properties == len(self.properties):
+            self.properties.append(violation_property)
+        elif origin_properties + 1 == len(self.properties):
+            self.properties[len(self.properties) - 1] = violation_property
+        else:
+            assert False
+
+    @staticmethod
+    def _get_undecided_formulae(undecided_formulae, undecided_indices):
+        checked_formula = 0
+        for idx, formula in enumerate(undecided_formulae):
+            if formula:
+                undecided_formulae[idx] = checked_formula in undecided_indices
+                checked_formula += 1
+        return undecided_formulae
 
     @staticmethod
     def _get_new_options(nr_options_remaining, hole_options):
         return nr_options_remaining - hole_options[0].size(), hole_options[1:]
+
+    @staticmethod
+    def _get_new_options_map(nr_options_remaining, hole_options_map):
+        return nr_options_remaining - hole_options_map[0][0].size(), hole_options_map[1:]
 
     def run_feasibility(self):
         if self.input_has_restrictions():
@@ -149,14 +176,24 @@ class LiftingChecker(QuotientBasedFamilyChecker):
         oracle, optimal_hole_option = None, None
         iterations, optimal_iterations = 0, 0
         optimal_value = 0.0
+        origin_properties = len(self.properties)
         hole_options_next_round = []
         update_oracle_setting, sat = False, False
 
-        hole_options = [self.hole_options]
+        hole_options_map = [(self.hole_options, [True] * len(self.mc_formulae))]
         nr_options_remaining = self.hole_options.size()
         logger.info(f"Total number of options: {self.hole_options.size()}")
 
         while True and nr_options_remaining:
+            if update_oracle_setting:
+                hole_options_map = \
+                    [(option, formulae + [True]) for (option, formulae) in hole_options_map]
+
+            _, undecided_formulae = hole_options_map[0]
+            self.copy_formulae_attrs()
+            self._delete_sat_formulae([idx for idx, uf in enumerate(undecided_formulae) if uf])
+
+            hole_options = [o for o, _ in hole_options_map]
             iterations, oracle, threshold_synthesis_results = self._perform_analysis(
                 iterations, hole_options, hole_options_next_round, oracle, update_oracle_setting
             )
@@ -164,7 +201,8 @@ class LiftingChecker(QuotientBasedFamilyChecker):
 
             if self._contains_unsat_result(threshold_synthesis_results):
                 logger.debug("Unsatisfying.")
-                nr_options_remaining, hole_options = self._get_new_options(nr_options_remaining, hole_options)
+                nr_options_remaining, hole_options_map = \
+                    self._get_new_options_map(nr_options_remaining, hole_options_map)
             else:
                 undecided_indices = [
                     idx for idx, r in enumerate(threshold_synthesis_results) if r == ThresholdSynthesisResult.UNDECIDED
@@ -172,7 +210,10 @@ class LiftingChecker(QuotientBasedFamilyChecker):
                 if undecided_indices:
                     logger.debug("Undecided.")
                     oracle.scheduler_color_analysis()
-                    hole_options = self._split_hole_options(hole_options[0], oracle) + hole_options[1:]
+                    new_options = self._split_hole_options(hole_options[0], oracle)
+                    undecided_formulae = self._get_undecided_formulae(undecided_formulae, undecided_indices)
+                    new_options = [(new_option, undecided_formulae) for new_option in new_options]
+                    hole_options_map = new_options[:] + hole_options_map[1:]
                 else:
                     logger.debug("Satisfying.")
                     if self.input_has_optimality_property():
@@ -182,12 +223,10 @@ class LiftingChecker(QuotientBasedFamilyChecker):
                             optimal_value = value
                             optimal_hole_option = hole_option
                             optimal_iterations = iters
-                        nr_options_remaining, hole_options = self._get_new_options(nr_options_remaining, hole_options)
+                        nr_options_remaining, hole_options_map = \
+                            self._get_new_options_map(nr_options_remaining, hole_options_map)
 
-                        self.properties.append(self._optimality_setting.get_violation_property(
-                            optimal_value,
-                            lambda x: self.sketch.expression_manager.create_rational(stormpy.Rational(x))
-                        ))
+                        self._construct_violation_property(optimal_value, origin_properties)
                         self.initialise()
                         update_oracle_setting = True
                     else:
@@ -197,7 +236,8 @@ class LiftingChecker(QuotientBasedFamilyChecker):
                 if bool(next_round):
                     break
                 elif next_round is not None:
-                    hole_options, hole_options_next_round = hole_options_next_round, []
+                    hole_options_map, hole_options_next_round = hole_options_next_round, []
+
         return (sat, optimal_hole_option, optimal_value, optimal_iterations + iterations) \
             if self.input_has_optimality_property() else (False, None, None, iterations)
 
@@ -206,7 +246,7 @@ class LiftingChecker(QuotientBasedFamilyChecker):
 
         :return:
         """
-        oracle, optimal_hole_options = None, None
+        oracle, optimal_hole_option = None, None
         iterations = 0
 
         hole_options = [hole_option]
@@ -233,8 +273,8 @@ class LiftingChecker(QuotientBasedFamilyChecker):
                         improved = True
 
                     if improved:
-                        nr_options_remaining -= 1 if optimal_hole_options is not None else 0
-                        optimal_hole_options = hole_options[0]
+                        nr_options_remaining -= 1 if optimal_hole_option is not None else 0
+                        optimal_hole_option = hole_options[0]
                         nr_options_remaining, hole_options = self._get_new_options(nr_options_remaining, hole_options)
                     else:
                         hole_options = self._split_hole_options(hole_options[0], oracle) + hole_options[1:]
@@ -256,10 +296,10 @@ class LiftingChecker(QuotientBasedFamilyChecker):
                     nr_options_remaining, hole_options = self._get_new_options(nr_options_remaining, hole_options)
 
                 if improved_tight:
-                    optimal_hole_options = hole_options[0]
+                    optimal_hole_option = hole_options[0]
                     nr_options_remaining, hole_options = self._get_new_options(nr_options_remaining, hole_options)
                 elif improved_tight is not None:
-                    optimal_hole_options = None
+                    optimal_hole_option = None
                     hole_options = self._split_hole_options(hole_options[0], oracle) + hole_options[1:]
 
             next_round = self._check_next_round(oracle, hole_options, hole_options_next_round, nr_options_remaining)
@@ -268,9 +308,10 @@ class LiftingChecker(QuotientBasedFamilyChecker):
             elif next_round is not None:
                 hole_options, hole_options_next_round = hole_options_next_round, []
 
-            logger.info(f"Optimal value at {self.thresholds[0]} with {optimal_hole_options}")
+            logger.info(f"Optimal value at {self.thresholds[0]} with {optimal_hole_option}")
 
-        return True, optimal_hole_options.pick_one_in_family(), self.thresholds[0], iterations
+        # TODO: which member of the family has optimal solution
+        return True, optimal_hole_option.pick_one_in_family(), self.thresholds[0], iterations
 
     def _perform_analysis(self, iterations, hole_options, hole_options_next_round, oracle, update_oracle=False):
         iterations += 1
