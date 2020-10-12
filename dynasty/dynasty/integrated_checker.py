@@ -7,10 +7,9 @@ import z3
 import operator
 import stormpy
 
-from dynasty.annotated_property import AnnotatedProperty
 from dynasty.family_checkers.cegis import Synthesiser
 from dynasty.family_checkers.quotientbased import LiftingChecker
-from dynasty.family_checkers.familychecker import HoleOptions
+from dynasty.jani.jani_quotient_builder import JaniQuotientBuilder, ThresholdSynthesisResult
 
 logger = logging.getLogger(__file__)
 
@@ -266,13 +265,13 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         self.mdp_mc_results = []
         self.allowed_to_split_options = True
         self.hole_option_indices = None
-        self.models_total = 1
+        self.models_total = 0
         self.stage_timer = Timer()
         self.stage_switch_allowed = True  # once a method wins, set this to false and do not switch between methods
         self.stage_score = 0  # +1 point whenever cegar wins the stage, -1 otherwise
         # cegar wins over cegis by reaching this limit, cegis wins by reaching the negative
         # TODO: note: this is the only parameter in the integrated synthesis
-        self.stage_score_limit = 25
+        # self.stage_score_limit = None
         # cegar/cegis stats
         self.stage_time_cegar, self.stage_pruned_cegar, self.stage_time_cegis, self.stage_pruned_cegis = 0, 0, 0, 0
         # multiplier to derive time allocated for cegis; =1 is fair, <1 favours cegar, >1 favours cegis
@@ -282,6 +281,11 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         # TODO: Check initial values
         self.cegis_allocated_time = 0
         self.stage_time_allocation_cegis = 0
+        # CE quality
+        self.ce_maxsat, self.ce_zero, self.ce_global, self.ce_holes, self.ce_states = 0, 0, 0, 0, 0
+        self.global_mdp = None
+        self.global_mdp_results = []
+        self.counterexamples_global = []
 
     def stage_start(self, request_stage_cegar):
         self.stage_cegar = request_stage_cegar
@@ -312,46 +316,13 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
 
     def cegar_analyse_option(self, problems, last=True):
         """Analyse region and store mdp data."""
-        hole_options_map = [(option, formulae) for (option, formulae, _) in problems]
+        hole_options_map = [(option, formulae) for (option, formulae, _, _) in problems]
         undecided_formulae, hole_options_map = CEGARChecker.cegar_analyse_option(self, hole_options_map, last=True)
-        problems = [(o, f, b) for (o, f), (_, _, b) in zip(hole_options_map, problems[:-1])]
+        problems = [(o, f, b, s) for (o, f), (_, _, b, s) in zip(hole_options_map, problems[:-1])]
         self.cegar_iterations += 1
-        self.mdp = self.oracle._mdp_handling.mdp
-        self.mdp_mc_result = self.oracle._latest_result.result
-        
-    # ----- Adaptivity ----- #
-    # Main idea: switch between cegar/cegis, allocate more time to the more
-    # efficient method; if one method is consistently better than the other,
-    # declare it the winner and stop switching
-
-    # cegar wins over cegis by reaching the score limit, cegis wins by reaching the negative
-    # note: this is the only parameter in the integrated synthesis
-    stage_score_limit = None
-
-    def stage_init(self):
-        # once a method wins, set this to false and do not switch between methods
-        self.stage_switch_allowed = True
-        # +1 point whenever cegar wins the stage, -1 otherwise
-        self.stage_score = 0
-        
-        # cegar/cegis stats
-        self.stage_time_cegar = 0
-        self.stage_pruned_cegar = 0
-        self.stage_time_cegis = 0
-        self.stage_pruned_cegis = 0
-
-        # multiplier to derive time allocated for cegis
-        # =1 is fair, <1 favours cegar, >1 favours cegis
-        self.cegis_allocated_time_factor = 1
-        self.stage_timer = Timer()
-
-        # start with CEGAR 
-        self.stage_start(request_stage_cegar = True)
-
-    def stage_start(self, request_stage_cegar):
-        self.stage_cegar = request_stage_cegar
-        self.stage_timer.reset()
-        self.stage_timer.start()
+        self.mdp = self.oracle.mdp_handling.mdp
+        self.mdp_mc_results = [self.oracle.latest_results.pop(0).result for f in undecided_formulae if f]
+        return undecided_formulae, problems
 
     def stage_step(self, models_pruned):
         """Performs a stage step, returns True if the method switch took place"""
@@ -413,69 +384,46 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         self.stage_time_allocation_cegis = cegis_dominance
 
         # stage log
-        print("> ", end="")
-        print("{:.2e} \\\\ {:.2e} = {:.1e} ({})".format(success_rate_cegar, success_rate_cegis, cegis_dominance, self.stage_score))
+        print(
+            f"> {success_rate_cegar:.2f} \\\\ {success_rate_cegis:.2f} = {cegis_dominance:.1f} ({self.stage_score})"
+        )
 
         # switch back to cegar
         self.stage_start(request_stage_cegar=True)
         return True
 
+    def relevant_holes(self, critical_edges, relevant_holes):
+        holes = self.verifier.conflict_analysis(critical_edges)
+        holes = [hole for hole in holes if hole in relevant_holes]
+        return holes
+
     # ----- CE quality ----- #
 
-    ce_quality_compute = False
-
-    def ce_quality_init(self):
-        if not self.ce_quality_compute:
-            return
-        self.ce_maxsat = self.ce_zero = self.ce_global = self.ce_local = 0
-        self.ce_maxsat_timer = Timer()
-        self.ce_zero_timer = Timer()
-        self.ce_global_timer = Timer()
-        self.ce_local_timer = Timer()
-        self.global_mdp = self.global_mdp_result = None
-
-    def ce_quality_global(self,mdp,mdp_result):
-        if not self.ce_quality_compute:
-            return
-        if self.global_mdp is not None:
-            return
+    def ce_quality_global(self, mdp, mdp_results):
         self.global_mdp = mdp
-        self.global_mdp_result = mdp_result
+        self.global_mdp_results = mdp_results[:]
 
-    def ce_quality_subfamily(self,sketch,relevant_holes_flatset,formula):
-        if not self.ce_quality_compute:
-            return
-        self.counterexample_global = stormpy.SynthesisResearchCounterexample(sketch, relevant_holes_flatset, formula, self.global_mdp, self.global_mdp_result)
-
-    def ce_quality_measure(self,instance,relevant_holes,counterexample,dtmc):
-        if not self.ce_quality_compute:
-            return
+    def ce_quality_measure(self, instance, relevant_holes, counterexample, dtmc, conflict, dtmc_result, idx):
         self.statistic.timer.stop()
         self.stage_timer.stop()
-        
-        # ce_states = counterexample.construct_via_states(dtmc, dtmc_result, 1, 99999)
-        # conflict_states = self.relevant_holes(ce_states, relevant_holes)
-        # self.ce_states += len(conflict_states) / len(relevant_holes)
 
-        # maxsat
-        self.ce_maxsat_timer.start()
-        conflict_maxsat = self.conflict_maxsat(instance)
-        # conflict_maxsat = relevant_holes.copy()
+        ce_states = counterexample.construct_via_states(dtmc, dtmc_result, 1, 99999)
+        conflict_states = self.relevant_holes(ce_states, relevant_holes)
+        self.ce_states += len(conflict_states) / len(relevant_holes)
+        _, conflict_maxsat = self.verifier.naive_check(instance, all_conflicts=True, check_conflicts=False)
         conflict_maxsat = [hole for hole in conflict_maxsat if hole in relevant_holes]
-        self.ce_maxsat += len(conflict_maxsat) / len(relevant_holes)
-        self.ce_maxsat_timer.stop()
-
-        # zero
-        self.ce_zero_timer.start()
         conflict_zero = counterexample.construct_via_holes(dtmc, False)
+        # TODO: Segmentation fault
+        # conflict_global = self.counterexamples_global[idx].construct_via_holes(dtmc, True)
+
+        self.ce_maxsat += len(conflict_maxsat) / len(relevant_holes)
         self.ce_zero += len(conflict_zero) / len(relevant_holes)
-        self.ce_zero_timer.stop()
-        
-        # global
-        self.ce_global_timer.start()
-        conflict_global = self.counterexample_global.construct_via_holes(dtmc, True)
-        self.ce_global += len(conflict_global) / len(relevant_holes)
-        self.ce_global_timer.stop()
+        # self.ce_global += len(conflict_global) / len(relevant_holes)
+        self.ce_holes += len(conflict) / len(relevant_holes)
+        print(f"> {self.ce_maxsat / self.cegis_iterations} vs {self.ce_holes / self.cegis_iterations}")
+
+        self.stage_timer.start()
+        self.statistic.timer.start()
 
         # local
         self.ce_local_timer.start()
@@ -491,78 +439,54 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
 
 
     def ce_quality_print(self):
-        if not self.ce_quality_compute:
-            return
-        if self.cegis_iterations < 1:
+        if self.cegis_iterations == 0:
             print("> ce quality: n/a")
         else:
-            iters = self.cegis_iterations
-            quality_maxsat = self.ce_maxsat / iters
-            time_maxsat = self.ce_maxsat_timer.read() / iters
-            quality_zero = self.ce_zero / iters
-            time_zero = self.ce_zero_timer.read() / iters
-            quality_global = self.ce_global / iters
-            time_global = self.ce_global_timer.read() / iters
-            quality_local = self.ce_local / iters
-            time_local = self.ce_local_timer.read() / iters
-            print("> ce quality: {:1.4f} - {:1.4f} - {:1.4f} - {:1.4f}".format(quality_maxsat, quality_zero, quality_global, quality_local))
-            print("> ce time: {:1.4f} - {:1.4f} - {:1.4f} - {:1.4f}".format(time_maxsat, time_zero, time_global, time_local))
+            print(
+                f"> ce quality: {self.ce_maxsat / self.cegis_iterations} - {self.ce_zero / self.cegis_iterations} - "
+                f"{self.ce_global / self.cegis_iterations} - {self.ce_holes / self.cegis_iterations}"
+            )
 
-    def conflict_maxsat(self, instance, all_conflicts=True, naive_deadlocks=True, check_conflicts=False):
-        """Naive counterexample generation (for comparison)."""
+    # ----- CE quality ----- #
 
-        model = self._verifier._build_model(instance)
-        qualitative_conflicts_properties, quantitative_conflict_properties = self._verifier._naive_check_model(model,
-                                                                                                     all_conflicts)
-        if qualitative_conflicts_properties:
-            # conflicts.add(tuple([c.name for c in self.sketch.used_constants()]))
-            # TODO handling for qualitative conflicts can certainly be improved.
-            return qualitative_conflicts_properties, set()
+    def _construct_violation_ce(self, family, relevant_holes_flatset):
+        vp = self._construct_violation_property(self.optimal_value)
 
-        # Construct the environment for the counterexample generator.
-        env = stormpy.core.Environment()
-        env.solver_environment.set_linear_equation_solver_type(stormpy.EquationSolverType.native)
-        # env.solver_environment.set_force_sound()
+        self._set_optimality_setting()
+        analyse_result = self._analyse_from_scratch(self._open_constants, family, set())
+        mdp_result = analyse_result.latest_results[0].result
+        CEGARChecker.initialise(self)
 
-        # We can sometimes merge properties into a single meta-property for conflict analysis.
-        merged_conflict_props = self._verifier._merge_conflict_properties(quantitative_conflict_properties)
-        assert(len(merged_conflict_props) == 1)
-        (p,additional) = next(iter(merged_conflict_props.items()))
-
-        # Create input for the counterexample generation.
-        symbolic_model = stormpy.SymbolicModelDescription(instance)
-        cex_input = stormpy.core.SMTCounterExampleGenerator.precompute(env, symbolic_model, model, p.raw_formula)
-        for a in additional:
-            cex_input.add_reward_and_threshold(a[0], a[1])
-
-        # Prepare execution of the counterexample generation
-        cex_stats = stormpy.core.SMTCounterExampleGeneratorStats()
-        # Generate the counterexample
-        result = stormpy.core.SMTCounterExampleGenerator.build(
-            env, cex_stats, symbolic_model, model, cex_input, self._verifier._dont_care_set, self._verifier.cex_options
+        return stormpy.SynthesisResearchCounterexample(
+            self.sketch, relevant_holes_flatset, vp.raw_formula, analyse_result.mdp_handling.mdp, mdp_result
         )
-        # assert(result.__len__() == 1)
-        critical_edges_fs = result.pop()
-        
-        # Translate the counterexamples into conflicts.
-        conflict = self._verifier._conflict_analysis(critical_edges_fs)
-        return conflict
 
-    # ----- hybrid method ----- #
+    def _update_problems(self, problems, problem, formulae):
+        hole_options_map = [(o, f) for (o, f, _, _) in problems]
+        hole_options_map = self._violation_property_update(
+            self.optimal_value, self.oracle, hole_options_map
+        )
+        assert len(hole_options_map) == len(problems)
+        problems = [(o, f, b, s) for (o, f), (_, _, b, s) in zip(hole_options_map, problems)]
+        problem[1][-1] = True if len(formulae) == len(self._properties) else problem[1][-1]
+        if not len(formulae) == len(self._properties):
+            problem[1].append(True)
+        return problems, problem
 
-    only_cegar = False
-    only_cegis = False
-    use_nontrivial_bounds = True
+    def _prepare_properties(self, mdp_results, formulae):
+        assert len(self._properties) == len(formulae)
+        self.properties = [self._properties[idx] for idx, uf in enumerate(formulae) if uf]
+        # mdp_result was not generated for violation property, therefore we will ignore it
+        self.properties = self.properties[:-1] if len(mdp_results) + 1 == len(self.properties) else self.properties
+        assert len(mdp_results) == len(self.properties)
 
-    def relevant_holes(self, critical_edges, relevant_holes):
-        holes = self._verifier._conflict_analysis(critical_edges)
-        holes = [hole for hole in holes if hole in relevant_holes]
-        return holes
-
-    def cegis_analyse_family(self, builder_options, family, mdp, mdp_result):
+    def cegis_analyse_family(self, builder_options, problems):
         """Analyse a family using provided mdp data to construct generalized counterexamples."""
         logger.debug("CEGIS stage.")
-        # print("> cegis stage".format(), flush=True)
+
+        problem = problems.pop(-1)
+        family, formulae, (mdp, mdp_results), _ = problem
+        self._prepare_properties(mdp_results, formulae)
 
         if self.only_cegis:
             # disallow return to CEGAR
@@ -581,22 +505,22 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         relevant_holes_flatset = stormpy.core.FlatSetString()
         [relevant_holes_flatset.insert(hole) for hole in relevant_holes]
         counterexamples = []
-        for prop, mdp_result in zip(self.properties, mdp_results):
+        for idx, (prop, mdp_result) in enumerate(zip(self.properties, mdp_results)):
             counterexamples.append(stormpy.SynthesisResearchCounterexample(
                 self.sketch, relevant_holes_flatset, prop.raw_formula, mdp, mdp_result
             ))
+            # CE generator for global MDP bounds
+            # self.counterexamples_global.append(stormpy.SynthesisResearchCounterexample(
+            #     self.sketch, relevant_holes_flatset, prop.raw_formula, self.global_mdp, self.global_mdp_results[idx]
+            # ))
 
-        # CE generator for global MDP bounds
-        self.ce_quality_subfamily(self.sketch, relevant_holes_flatset, self.property.raw_formula)
-        
-        # get satisfiable assignments (within the subfamily)
+        # get satisfiable assignments (withing the subfamily)
         solver_result = self.solver.check(family_encoding)
         while solver_result == z3.sat:
             self.cegis_iterations += 1
             logger.info("CEGIS iteration {}.".format(self.cegis_iterations))
-            # print("> cegis iter: {}".format(self.cegis_iterations), flush=True)
-        
-            # create an assignment for the holes
+
+            # Get satisfiable assignment
             sat_model = self.solver.model()
             # Create an assignment for the holes ..
             hole_assignments = self._sat_model_to_constants_assignment(sat_model)
@@ -609,34 +533,49 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
             assert dtmc.labeling.get_states("deadlock").number_of_set_bits() == 0
 
             logger.debug("Constructed DTMC of size {}.".format(dtmc.nr_states))
+            assert len(dtmc.initial_states) == 1  # to avoid ambiguity
+            assert dtmc.initial_states[0] == 0  # should be implied by topological ordering
 
-            assert len(dtmc.initial_states) == 1 # to avoid ambiguity
-            assert dtmc.initial_states[0] == 0 # should be implied by topological ordering
-            dtmc_sat, dtmc_result = check_model(dtmc, self.property, quantitative=True)
-            if dtmc_sat:
-                self.satisfying_assignment = assignment
-                return True
+            satisfied = []
+            for index, prop in enumerate(self.properties):
+                dtmc_sat, dtmc_result = check_model(dtmc, prop, quantitative=True)
+                satisfied.append(dtmc_sat)
+                if not dtmc_sat:
+                    critical_edges = counterexamples[index].construct_via_holes(dtmc, True)
+                    conflict = critical_edges
+                    clause = z3.Not(z3.And(
+                        [var == sat_model[var] for var, hole in self.template_meta_vars.items() if hole in conflict]
+                    ))
+                    self.solver.add(clause)
 
-            # unsat: construct a counterexample
-            conflict = counterexample.construct_via_holes(dtmc, self.use_nontrivial_bounds)
+                    # compare to maxsat, state exploration, naive hole exploration, global vs local bounds
+                    self.ce_quality_measure(
+                        instance, relevant_holes, counterexamples[index], dtmc, conflict, dtmc_result, index
+                    )
 
-            # compare maxsat vs state exploration vs naive hole exploration vs global bounds vs local bounds
-            self.ce_quality_measure(instance, relevant_holes, counterexample, dtmc)
-            
-            # estimate number of (virtually) pruned models
-            # models_pruned = 1
-            # irrelevant_holes = set(relevant_holes) - set(conflict)
-            # for hole in irrelevant_holes:
-                # models_pruned *= len(family[hole])
-            # print("> is: CE - holes {}/{} | models {}/{} = {:1.4f}".format(len(conflict), len(self.holes), models_pruned, family_size, models_pruned/family_size))
-
-            # add new clause
-            counterexample_clauses = family_clauses.copy()
-            for var,hole in self.template_metavariables.items():
-                if hole in conflict:
-                    counterexample_clauses[hole] = (var == sat_model[var])
-            counterexample_encoding = z3.Not(z3.And(list(counterexample_clauses.values())))
-            self.solver.add(counterexample_encoding)
+            if all(satisfied):  # SAT
+                if self.input_has_optimality_property():
+                    dtmc_result = stormpy.model_checking(dtmc, self._optimality_setting.criterion)
+                    if self._optimality_setting.is_improvement(
+                            dtmc_result.at(dtmc.initial_states[0]), self.optimal_value
+                    ):
+                        logger.debug("Optimal value improved to {}.".format(dtmc_result.at(dtmc.initial_states[0])))
+                        self.optimal_value = dtmc_result.at(dtmc.initial_states[0])
+                        self.optimal_option = hole_assignments
+                        problems, problem = self._update_problems(problems, problem, formulae)
+                        counterexamples.append(self._construct_violation_ce(family, relevant_holes_flatset))
+                    else:
+                        logger.debug("Optimal value ({}) not improved, conflict analysis!".format(self.optimal_value))
+                        counterexamples.append(self._construct_violation_ce(family, relevant_holes_flatset))
+                        critical_edges = counterexamples[-1].construct_via_holes(dtmc, True)
+                        conflict = critical_edges
+                        clause = z3.Not(z3.And(
+                            [var == sat_model[var] for var, hole in self.template_meta_vars.items() if hole in conflict]
+                        ))
+                        self.solver.add(clause)
+                else:
+                    self.satisfying_assignment = hole_assignments
+                    break
 
             # read next solution
             solver_result = self.solver.check(family_encoding)
@@ -664,12 +603,7 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
     def run_feasibility(self):
         """Run feasibility synthesis."""
         logger.info("Running feasibility synthesis.")
-        assert not self.input_has_optimality_property()
-        # assert not self.input_has_restrictions()
 
-        # measure ce quality
-        self.ce_quality_init()
-        
         # precompute DTMC builder options
         raw_formulae = [p.property.raw_formula for p in self.properties]
         if self.input_has_optimality_property():
@@ -677,100 +611,82 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         builder_options = stormpy.BuilderOptions(raw_formulae)
         builder_options.set_build_with_choice_origins(True)
         builder_options.set_build_state_valuations(True)
-        # builder_options.set_add_overlapping_guards_label() #?
-        
+        builder_options.set_add_overlapping_guards_label()
+
         # initialize solver describing the family and counterexamples
         # note: restricting to subfamilies is encoded separately
         self._initialize_solver()
-
         # a map for indices of options
         self._construct_hole_option_indices()
 
         # initialize cegar
         families = self.cegar_initialisation()
-        family = families[0]
+        # identify edges with open constants
+        family, formulae = families[0]
         logger.info("Family members: {}.".format(family.size()))
 
         # initiate cegar-cegis loop
-        problems = [(family,None,None)]
+        problems = [(family, formulae, None, None)]
         self.models_total = family.size()
-        self.stage_init()
-        if self.only_cegar:
-            # disallow return to CEGIS
-            self.stage_switch_allowed = False
+        self.stage_start(request_stage_cegar=True)
+
         while problems:
             logger.debug("Current number of problems: {}".format(len(problems)))
-            # print("> ", format(len(problems)))
-            
-            # pick a problem
-            problem = problems.pop(-1)
-            family, bound, subfamilies = problem
+            # pick a family
+            problem = problems[-1]
+            family, formulae, bound, subfamilies = problem
             family_size = family.size()
             logger.info("Analysing subfamily of size {}.".format(family_size))
 
-            if self.stage_cegar:
-                # CEGAR
+            if self.stage_cegar:  # CEGAR
                 if subfamilies is not None:
                     # family has been already analysed: refine and continue
-                    # note: subfamilies inherit bound from the parent family
+                    # note: subfamilies inherit bound and formulae from the parent family
+                    problems.pop(-1)
                     logger.info("Splitting the family.")
-                    subproblems = [(subfamily, bound, None) for subfamily in subfamilies]
-                    problems.extend(subproblems)
+                    sub_problems = [(subfamily, formulae, bound, None) for subfamily in subfamilies]
+                    problems.extend(sub_problems)
                     continue
 
                 # family has not been analysed yet
                 logger.info("CEGAR iteration {}.".format(self.cegar_iterations+1))
-                # print("> cegar iter {}".format(self.cegar_iterations+1))
-                self.cegar_analyse_option(family)
+                undecided_formulae, problems = self.cegar_analyse_option(problems)
+                bound = (self.mdp, self.mdp_mc_results)
                 if self.satisfying_assignment is not None:
-                    # sat
                     logger.debug("Sat")
-                    # print("> (a) sat")
                     break
                 if self.new_options is None:
-                    # unsat
                     logger.debug("Unsat")
-                    # print("> (a) unsat")
                     models_pruned = family_size
                 else:
-                    # undecided: do not refine yet, store analysis result for cegis
                     logger.debug("Undecided.")
-                    # print("> (a) undecided")
                     models_pruned = 0
-                    bound = (self.mdp, self.mdp_mc_result)
-                    analysed_family = (family, bound, self.new_options)
-                    problems.append(analysed_family) #DFS
-                    # problems = [analysed_family] + problems # BFS
-                    self.ce_quality_global(self.mdp, self.mdp_mc_result)
-                    
+                    assert (len(self.new_options) == 2)
+                    # problems.append((family, undecided_formulae[:], bound, self.new_options[:]))  # DFS
+                    problems = [(family, undecided_formulae[:], bound, self.new_options)] + problems  # BFS
+                    self.new_options = None
+                    if self.global_mdp is None:
+                        self.ce_quality_global(self.mdp, self.mdp_mc_results)
                 self.stage_step(models_pruned)
-            
-            else:
-                # CEGIS
-                assert(bound is not None)
-                analysis_success = self.cegis_analyse_family(builder_options, family, bound[0], bound[1])
-                if self.satisfying_assignment is not None:
-                    # sat
+
+            else:  # CEGIS
+                assert bound is not None
+                analysis_success, problems, problem = self.cegis_analyse_family(builder_options, problems)
+                if self.satisfying_assignment is not None:  # sat
                     logger.debug("Sat")
-                    # print("> (i) sat")
                     break
                 if analysis_success:
-                    # unsat
                     logger.debug("Unsat")
-                    # print("> (i) unsat")
                     self.stage_step(family_size)
-                else:
-                    # stage interrupted: leave the family to cegar
-                    # note: phase was switched implicitly
+                else:  # stage unsuccessful: leave the family to cegar; note: phase switched implicitly
                     logger.debug("Stage interrupted.")
-                    # print("> (i) interrupted")
                     problems.append(problem)
 
         return self.compose_result([])
 
     def run(self):
         assignment = self.run_feasibility()
-        self.statistic.finished(assignment, (self.cegar_iterations, self.cegis_iterations))
+        self.statistic.finished(assignment, (self.cegar_iterations, self.cegis_iterations), self.optimal_value)
         self.ce_quality_print()
 
 
@@ -803,7 +719,7 @@ class Research:
             regime = int(lines[0])
             stage_score_limit = int(lines[1])
         IntegratedChecker.stage_score_limit = stage_score_limit
-        
+
         stats = []
 
         if regime == 0:
@@ -838,25 +754,3 @@ class Research:
         algorithm.initialise()
         algorithm.run()
         return algorithm.statistic
-
-'''
-# building dtmc from mdp
-            single_member = HoleOptions()
-            for var, hole in self.template_metavariables.items():
-                hole_option_index = sat_model[var].as_long()
-                single_member[hole] = [family[hole][hole_option_index]]
-            print("> single member ", single_member)
-            
-            # for hole,options in family:
-
-            print("> model_checking mdp(1)...")
-            self._analyse_suboptions(single_member)
-            threshold_synthesis_result = self.oracle.decided(self.threshold)
-            assert(threshold_synthesis_result != ThresholdSynthesisResult.UNDECIDED)
-            if (threshold_synthesis_result == ThresholdSynthesisResult.ABOVE) == self._accept_if_above[0]:
-                self.satisfying_assignment = single_member.pick_one_in_family()
-                return True
-            
-            print("> converting to dtmc...")
-            dtmc_mdp = self.oracle._mdp_handling.mdp._as_sparse_dtmc()
-'''
