@@ -76,7 +76,7 @@ class OptimalitySetting:
         if self._direction == "max":
             return mc_result > best_so_far
 
-    def get_violation_property(self, best_so_far, bound_translator, sketch=None):
+    def get_violation_property(self, best_so_far, bound_translator):
         vp = stormpy.Property(
             "optimality_violation",
             self._criterion.raw_formula.clone(),
@@ -89,7 +89,7 @@ class OptimalitySetting:
             ct = stormpy.logic.ComparisonType.GREATER
         bound = bound_translator(bound)
         vp.raw_formula.set_bound(ct, bound)
-        return AnnotatedProperty(vp, sketch, False) if sketch else vp
+        return vp
 
 
 def open_constants(model):
@@ -146,7 +146,9 @@ class FamilyChecker:
         self.symmetries = None
         self.differents = None
         self.properties = None
+        self._properties = None
         self._optimality_setting = None
+        self.first_vp = True
 
         self.qualitative_properties = None
         self._engine = engine
@@ -181,6 +183,7 @@ class FamilyChecker:
         :return:
         """
         self.properties = []
+        self._properties = []
         self.qualitative_properties = []
 
         for p in properties:
@@ -289,6 +292,7 @@ class FamilyChecker:
                                              add_prerequisites=self._check_prereq
                                              ) for i, p in
                            enumerate(self.properties)]
+        self._properties = self.properties[:]
 
 
     def _set_constants(self, constant_str):

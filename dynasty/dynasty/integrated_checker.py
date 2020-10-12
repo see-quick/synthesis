@@ -7,6 +7,7 @@ import z3
 import operator
 import stormpy
 
+from dynasty.annotated_property import AnnotatedProperty
 from dynasty.family_checkers.cegis import Synthesiser
 from dynasty.family_checkers.quotientbased import LiftingChecker
 from dynasty.family_checkers.familychecker import HoleOptions
@@ -35,54 +36,44 @@ def check_model(model, property_obj, quantitative=False):
     return satisfied, result
 
 
-def readable_assignment(assignment):
-    return {k: v.__str__() for (k, v) in assignment.items()} if assignment is not None else None
-
-
 class Timer:
     def __init__(self):
-        self.reset()
-
-    def reset(self):
         self.running = False
-        self.timer = None        
+        self.timer = None
         self.time = 0
 
+    def reset(self):
+        self.__init__()
+
     def start(self):
-        if self.running:
-            return
-        self.timer = time.time()
+        self.timer = self.timer if self.running else time.time()
         self.running = True
 
     def stop(self):
-        if not self.running:
-            return
-        self.time += time.time() - self.timer
-        self.timer = None
+        self.time += time.time() - self.timer if self.running else 0
+        self.timer = None if self.running else self.timer
         self.running = False
 
     def toggle(self):
-        if self.running:
-            self.stop()
-        else:
-            self.start()
+        self.stop() if self.running else self.start()
 
     def read(self):
-        if not self.running:
-            return self.time
-        else:
-            return self.time + (time.time() - self.timer)
-            
+        return self.time + (time.time() - self.timer) if self.running else self.time
+
 
 class Statistic:
     """General computation stats."""
+
     def __init__(self, method):
         self.method = method
         self.timer = Timer()
+        self.assignment = {}
+        self.iterations = 0
+        self.optimal_value = None
+        self.result = None
         self.timer.toggle()
-        
 
-    def finished(self, assignment, iterations):
+    def finished(self, assignment, iterations, optimal_value):
         self.timer.toggle()
         self.result = assignment is not None
         self.assignment = {k: v.__str__() for (k, v) in assignment.items()} if assignment is not None else None
@@ -90,32 +81,34 @@ class Statistic:
         self.optimal_value = optimal_value
 
     def __str__(self):
-        is_feasible = "feasible" if self.result else  "unfeasible"
-        return "> {}: {} ({} iters, {} sec)\n".format(self.method, is_feasible, self.iterations, round(self.timer.time,2))
+        is_feasible = "feasible" if self.result else "unfeasible"
+        # TODO: Print optimal_value
+        return f"> {self.method}: " \
+               f"{is_feasible} ({self.iterations} iters, {round(self.timer.time, 2)} sec, opt: {self.optimal_value})\n"
+
 
 class CEGISChecker(Synthesiser):
     """CEGIS wrapper."""
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.statistic = Statistic("CEGIS")
 
     def run(self):
-        _, assignment, _ = self.run_feasibility()
-        self.statistic.finished(assignment, self.stats.iterations, None)
+        _, assignment, opt_value, iters = self.run_feasibility()
+        self.statistic.finished(assignment, iters, opt_value)
 
 
 class CEGARChecker(LiftingChecker):
     """CEGAR wrapper."""
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.statistic = Statistic("CEGAR")
         self.iterations = 0
         self.optimal_iterations = 0
-        self.threshold = 0
         self.optimal_value = 0.0
         self.use_oracle = True
-        self.update_oracle = 0
-        self.origin_properties = 0
         self.new_options = None
         self.satisfying_assignment = None
         self.oracle = None
@@ -124,27 +117,31 @@ class CEGARChecker(LiftingChecker):
     def cegar_initialisation(self):
         self.jani_quotient_builder = JaniQuotientBuilder(self.sketch, self.holes)
         self._open_constants = self.holes
-        self.origin_properties = len(self.properties)
         return [(self.hole_options, [True] * len(self.mc_formulae))]
 
     def cegar_split_option(self, option, index=0):
         self.oracle.scheduler_color_analysis(index)
         return self._split_hole_options(option, self.oracle)
 
+    def __analyse_from_scratch(self, option):
+        self.oracle = LiftingChecker._analyse_from_scratch(self, self._open_constants, option, set())
+
+    def __analyse_suboptions(self, option):
+        LiftingChecker._analyse_sub_options(self, self.oracle, option)
+
     def _analyse_option(self, option):
         if self.oracle is None:
-            self.oracle = LiftingChecker._analyse_from_scratch(self, self._open_constants, option, set())
+            self.__analyse_from_scratch(option)
         else:
-            LiftingChecker._analyse_sub_options(self, self.oracle, option, self.update_oracle)
-            self.update_oracle = 2 if self.update_oracle == 1 else self.update_oracle
+            self.__analyse_suboptions(option)
 
-    def cegar_analyse_option(self, option_map):
-        option, undecided_formulae = option_map
+    def cegar_analyse_option(self, hole_options_map, last=False):
+        option, undecided_formulae = hole_options_map.pop(-1 if last else 0)
         self.iterations += 1
         is_max = self._optimality_setting.direction == "max" if self.input_has_optimality_property() else None
 
         self.copy_formulae_attrs()
-        self._delete_sat_formulae([idx for idx, uf in enumerate(undecided_formulae) if uf])
+        self.oracle = self._delete_sat_formulae([idx for idx, uf in enumerate(undecided_formulae) if uf], self.oracle)
         undecided_indices = list(range(0, len(self.mc_formulae)))
 
         logger.info(f"CEGAR: iteration {self.iterations}, analysing option {option}.")
@@ -152,6 +149,7 @@ class CEGARChecker(LiftingChecker):
 
         threshold_synthesis_results = self.oracle.decided(self.thresholds)
 
+        optimal_iter = False
         if self._contains_unsat_result(threshold_synthesis_results):
             logger.debug("Unsatisfying.")
         else:
@@ -162,30 +160,30 @@ class CEGARChecker(LiftingChecker):
                 self.new_options = self.cegar_split_option(option, undecided_indices[0])
             else:
                 if self.input_has_optimality_property():
-                    sat, candidate_option, value, iters = self._run_optimal_feasibility(option)
+                    sat, candidate_option, value, iters, latest_result = self._run_optimal_feasibility(option)
                     if (is_max and value > self.optimal_value) or (not is_max and value < self.optimal_value):
                         self.optimal_value = value
                         self.optimal_option = candidate_option
                         self.optimal_iterations = iters
 
-                    self._construct_violation_property(self.optimal_value, self.origin_properties)
-                    self.initialise()
-                    self.update_oracle = 1
+                        hole_options_map = self._violation_property_update(
+                            self.optimal_value, self.oracle, hole_options_map
+                        )
+                        # TODO: check it and append to CEGAR
+                        self.oracle.latest_results.append(latest_result)
+                        optimal_iter = True
                 else:
                     logger.debug("Satisfying.")
                     self.satisfying_assignment = option.pick_one_in_family()
 
-        return self._get_undecided_formulae(undecided_formulae, undecided_indices)
+        return self._get_undecided_formulae(undecided_formulae, undecided_indices, optimal_iter), hole_options_map
 
     def perform_iteration(self, hole_options_map):
-        undecided_formulae = self.cegar_analyse_option(hole_options_map.pop(0))
+        undecided_formulae, hole_options_map = self.cegar_analyse_option(hole_options_map)
         if self.new_options is not None:
             self.new_options = [(new_option, undecided_formulae[:]) for new_option in self.new_options]
             hole_options_map = self.new_options + hole_options_map
             self.new_options = None
-        if self.update_oracle == 1:
-            hole_options_map = \
-                [(option, formulae + [True]) for (option, formulae) in hole_options_map]
         return hole_options_map
 
     def run_feasibility(self):
@@ -249,24 +247,46 @@ class IntegratedStatistic(Statistic):
     def __str__(self):
         s = super().__str__()
         for (region_stat, storm_stat) in self.region_stats:
-            region_stat = [round(x, 3) if not isinstance(x, list) else x for x in region_stat]
+            region_stat = [round(x, 3) for x in region_stat]
             storm_stat = [round(x, 3) for x in storm_stat]
-            # s += "> {} : {}\n".format(region_stat, storm_stat)
+            s += "> {} : {}\n".format(region_stat, storm_stat)
         return s
 
 
 class IntegratedChecker(CEGISChecker, CEGARChecker):
     """Integrated checker."""
-    
+
     def __init__(self):
         CEGISChecker.__init__(self)
         CEGARChecker.__init__(self)
         self.cegis_iterations = 0
         self.cegar_iterations = 0
         self.statistic = IntegratedStatistic()
-        self.mdp, self.violation_mdp = None, None
+        self.mdp = None
         self.mdp_mc_results = []
         self.allowed_to_split_options = True
+        self.hole_option_indices = None
+        self.models_total = 1
+        self.stage_timer = Timer()
+        self.stage_switch_allowed = True  # once a method wins, set this to false and do not switch between methods
+        self.stage_score = 0  # +1 point whenever cegar wins the stage, -1 otherwise
+        # cegar wins over cegis by reaching this limit, cegis wins by reaching the negative
+        # TODO: note: this is the only parameter in the integrated synthesis
+        self.stage_score_limit = 25
+        # cegar/cegis stats
+        self.stage_time_cegar, self.stage_pruned_cegar, self.stage_time_cegis, self.stage_pruned_cegis = 0, 0, 0, 0
+        # multiplier to derive time allocated for cegis; =1 is fair, <1 favours cegar, >1 favours cegis
+        self.cegis_allocated_time_factor = 1
+        # start with CEGAR
+        self.stage_cegar = True
+        # TODO: Check initial values
+        self.cegis_allocated_time = 0
+        self.stage_time_allocation_cegis = 0
+
+    def stage_start(self, request_stage_cegar):
+        self.stage_cegar = request_stage_cegar
+        self.stage_timer.reset()
+        self.stage_timer.start()
 
     def initialise(self):
         CEGARChecker.initialise(self)
@@ -290,9 +310,11 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
             logger.info("No more options.")
             return None
 
-    def cegar_analyse_option(self, option):
+    def cegar_analyse_option(self, problems, last=True):
         """Analyse region and store mdp data."""
-        undecided_formulae = CEGARChecker.cegar_analyse_option(self, option)
+        hole_options_map = [(option, formulae) for (option, formulae, _) in problems]
+        undecided_formulae, hole_options_map = CEGARChecker.cegar_analyse_option(self, hole_options_map, last=True)
+        problems = [(o, f, b) for (o, f), (_, _, b) in zip(hole_options_map, problems[:-1])]
         self.cegar_iterations += 1
         self.mdp = self.oracle._mdp_handling.mdp
         self.mdp_mc_result = self.oracle._latest_result.result
@@ -339,28 +361,25 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
             return False
 
         # record pruned models
-        if self.stage_cegar:
-            self.stage_pruned_cegar += models_pruned / self.models_total
-        else:
-            self.stage_pruned_cegis += models_pruned / self.models_total
+        self.stage_pruned_cegar += models_pruned / self.models_total if self.stage_cegar else 0
+        self.stage_pruned_cegis += models_pruned / self.models_total if not self.stage_cegar else 0
 
         # allow cegis another stage step if some time remains
-        if not self.stage_cegar:
-            if self.stage_timer.read() < self.cegis_allocated_time:
-                return False
+        if not self.stage_cegar and self.stage_timer.read() < self.cegis_allocated_time:
+            return False
 
         # stage is finished: record time
         self.stage_timer.stop()
-        time = self.stage_timer.read()
+        current_time = self.stage_timer.read()
         if self.stage_cegar:
             # cegar stage over: allocate time for cegis and switch
-            self.stage_time_cegar += time
-            self.cegis_allocated_time = time * self.cegis_allocated_time_factor
-            self.stage_start(request_stage_cegar = False)
+            self.stage_time_cegar += current_time
+            self.cegis_allocated_time = current_time * self.cegis_allocated_time_factor
+            self.stage_start(request_stage_cegar=False)
             return True
 
         # cegis stage over
-        self.stage_time_cegis += time
+        self.stage_time_cegis += current_time
 
         # calculate average success rate, update stage score
         success_rate_cegar = self.stage_pruned_cegar / self.stage_time_cegar
@@ -373,7 +392,7 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
                 # print("> only cegar")
                 self.stage_switch_allowed = False
                 # switch back to cegar
-                self.stage_start(request_stage_cegar = True)
+                self.stage_start(request_stage_cegar=True)
                 return True
         elif success_rate_cegar < success_rate_cegis:
             # cegis wins the stage
@@ -389,7 +408,7 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         if self.stage_pruned_cegar == 0 or self.stage_pruned_cegis == 0:
             cegar_dominance = 1
         else:
-            cegar_dominance = success_rate_cegar / success_rate_cegis 
+            cegar_dominance = success_rate_cegar / success_rate_cegis
         cegis_dominance = 1 / cegar_dominance
         self.stage_time_allocation_cegis = cegis_dominance
 
@@ -398,7 +417,7 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         print("{:.2e} \\\\ {:.2e} = {:.1e} ({})".format(success_rate_cegar, success_rate_cegis, cegis_dominance, self.stage_score))
 
         # switch back to cegar
-        self.stage_start(request_stage_cegar = True)
+        self.stage_start(request_stage_cegar=True)
         return True
 
     # ----- CE quality ----- #
@@ -554,15 +573,18 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
 
         # encode family
         family_clauses = dict()
-        for var,hole in self.template_metavariables.items():
+        for var, hole in self.template_meta_vars.items():
             family_clauses[hole] = z3.Or([var == self.hole_option_indices[hole][option] for option in family[hole]])
         family_encoding = z3.And(list(family_clauses.values()))
-        
-        # prepare counterexample generator
+
+        # Prepare counter-example generator for each given property
         relevant_holes_flatset = stormpy.core.FlatSetString()
-        for hole in relevant_holes:
-            relevant_holes_flatset.insert(hole)
-        counterexample = stormpy.SynthesisResearchCounterexample(self.sketch, relevant_holes_flatset, self.property.raw_formula, mdp, mdp_result)
+        [relevant_holes_flatset.insert(hole) for hole in relevant_holes]
+        counterexamples = []
+        for prop, mdp_result in zip(self.properties, mdp_results):
+            counterexamples.append(stormpy.SynthesisResearchCounterexample(
+                self.sketch, relevant_holes_flatset, prop.raw_formula, mdp, mdp_result
+            ))
 
         # CE generator for global MDP bounds
         self.ce_quality_subfamily(self.sketch, relevant_holes_flatset, self.property.raw_formula)
@@ -576,18 +598,10 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         
             # create an assignment for the holes
             sat_model = self.solver.model()
-            assignment = OrderedDict()
-            for var, hole in self.template_metavariables.items():
-                val = sat_model[var].as_long()
-                assignment[hole] = self.hole_options[hole][val]
-            
-            # construct an instance based on the hole assignment
-            constants_map = dict()
-            ep = stormpy.storage.ExpressionParser(self.expression_manager)
-            ep.set_identifier_mapping(dict())
-            for hole_name, expr in assignment.items():
-                constants_map[self.holes[hole_name].expression_variable] = expr
-            instance = self.sketch.define_constants(constants_map).substitute_constants()
+            # Create an assignment for the holes ..
+            hole_assignments = self._sat_model_to_constants_assignment(sat_model)
+            # and construct instance ..
+            instance = self.build_instance(hole_assignments)
 
             # construct and model check a DTMC
             dtmc = stormpy.build_sparse_model_with_options(instance, builder_options)
@@ -630,12 +644,23 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
             # record stage
             if self.stage_step(0):
                 # switch requested
-                return False
+                assert self.stage_cegar
+                return False, problems, problem
 
         # full subfamily pruned
-        return True
-        
-    
+        assert self.solver.check(family_encoding) == z3.unsat or self.satisfying_assignment
+        return True, problems, problem
+
+    def _construct_hole_option_indices(self):
+        self.hole_option_indices = dict()
+        for hole, options in self.hole_options.items():
+            indices = dict()
+            k = 0
+            for option in options:
+                indices[option] = k
+                k += 1
+            self.hole_option_indices[hole] = indices
+
     def run_feasibility(self):
         """Run feasibility synthesis."""
         logger.info("Running feasibility synthesis.")
@@ -659,15 +684,8 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         self._initialize_solver()
 
         # a map for indices of options
-        self.hole_option_indices = dict()
-        for hole, options in self.hole_options.items():
-            indices = dict()
-            k = 0
-            for option in options:
-                indices[option] = k
-                k += 1
-            self.hole_option_indices[hole] = indices
-        
+        self._construct_hole_option_indices()
+
         # initialize cegar
         families = self.cegar_initialisation()
         family = families[0]
@@ -747,7 +765,7 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
                     logger.debug("Stage interrupted.")
                     # print("> (i) interrupted")
                     problems.append(problem)
-            
+
         return self.compose_result([])
 
     def run(self):
@@ -758,6 +776,7 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
 
 class Research:
     """Entry point: execution setup."""
+
     def __init__(
             self, check_prerequisites, backward_cuts, sketch_path, allowed_path, property_path,
             optimality_path, constants, restrictions, restriction_path
@@ -773,7 +792,6 @@ class Research:
         self.constants = constants
         self.restrictions = restrictions
         self.restriction_path = restriction_path
-        self.backward_cuts = backward_cuts
 
         # import research.generator1
         # import research.generator2
@@ -799,7 +817,7 @@ class Research:
         elif regime == 3:
             stats.append(self.run_algorithm(IntegratedChecker))
         # elif regime in [2,3]:
-            # stats.append(self.run_algorithm(IntegratedChecker))
+        # stats.append(self.run_algorithm(IntegratedChecker))
         else:
             assert None
 

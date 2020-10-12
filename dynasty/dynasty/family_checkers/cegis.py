@@ -133,9 +133,9 @@ class Synthesiser(FamilyChecker):
         ep.set_identifier_mapping(dict())
         for hole_name, expr in assignments.items():
             constants_map[self.holes[hole_name].expression_variable] = expr
-        logger.debug("construct instance")
+        # logger.debug("construct instance")
         instance = self.sketch.define_constants(constants_map).substitute_constants()
-        logger.debug("constructed instance")
+        # logger.debug("constructed instance")
         return instance
 
     def _compute_dont_care_set(self):
