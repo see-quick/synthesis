@@ -135,7 +135,7 @@ class LiftingChecker(QuotientBasedFamilyChecker):
             oracle.mdp_handling._formulae = self.mc_formulae[:]
             oracle.mdp_handling._alt_formulae = self.mc_formulae_alt[:]
         assert len(self.mc_formulae) == len(self.mc_formulae_alt) == len(self.thresholds) == \
-            len(self._accept_if_above) == len(undecided)
+               len(self._accept_if_above) == len(undecided)
         return oracle
 
     def _construct_violation_property(self, optimal_value):
@@ -147,10 +147,12 @@ class LiftingChecker(QuotientBasedFamilyChecker):
     def _add_violation_property(self, violation_property):
         if self.first_vp:
             self._properties.append(violation_property)
-            self.properties.append(violation_property)
-        else:
+        elif len(self._properties):
             self._properties[len(self._properties) - 1] = violation_property
-            self.properties[len(self.properties) - 1] = violation_property
+        if self.first_vp:
+            self.properties.append(violation_property)
+        elif len(self.properties):
+            self.properties[len(self._properties) - 1] = violation_property
 
     def _violation_property_update(self, optimal_value, oracle, hole_options_map):
         vp = self._construct_violation_property(optimal_value)
@@ -244,7 +246,7 @@ class LiftingChecker(QuotientBasedFamilyChecker):
         return (sat, optimal_hole_option, optimal_value, optimal_iterations + iterations) \
             if self.input_has_optimality_property() else (False, None, None, iterations)
 
-    def _run_optimal_feasibility(self, hole_option):
+    def _run_optimal_feasibility(self, hole_option, one_iter=False):
         """
 
         :return:
@@ -306,7 +308,7 @@ class LiftingChecker(QuotientBasedFamilyChecker):
                     hole_options = self._split_hole_options(hole_options[0], oracle) + hole_options[1:]
 
             next_round = self._check_next_round(oracle, hole_options, hole_options_next_round, nr_options_remaining)
-            if bool(next_round):
+            if bool(next_round) or one_iter:
                 break
             elif next_round is not None:
                 hole_options, hole_options_next_round = hole_options_next_round, []
@@ -314,8 +316,10 @@ class LiftingChecker(QuotientBasedFamilyChecker):
             logger.info(f"Optimal value at {self.thresholds[0]} with {optimal_hole_option}")
 
         # TODO: which member of the family has optimal solution
+        hole_options = hole_options_next_round if next_round is not None else hole_options
         assert len(oracle.latest_results) == 1
-        return True, optimal_hole_option.pick_one_in_family(), self.thresholds[0], iterations, oracle.latest_results[0]
+        return True, optimal_hole_option.pick_one_in_family() if optimal_hole_option is not None else None, \
+            self.thresholds[0], iterations, oracle.latest_results[0], hole_options
 
     def _perform_analysis(self, iterations, hole_options, hole_options_next_round, oracle):
         iterations += 1

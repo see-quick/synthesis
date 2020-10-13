@@ -81,7 +81,6 @@ class Statistic:
 
     def __str__(self):
         is_feasible = "feasible" if self.result else "unfeasible"
-        # TODO: Print optimal_value
         return f"> {self.method}: " \
                f"{is_feasible} ({self.iterations} iters, {round(self.timer.time, 2)} sec, opt: {self.optimal_value})\n"
 
@@ -159,18 +158,21 @@ class CEGARChecker(LiftingChecker):
                 self.new_options = self.cegar_split_option(option, undecided_indices[0])
             else:
                 if self.input_has_optimality_property():
-                    sat, candidate_option, value, iters, latest_result = self._run_optimal_feasibility(option)
+                    sat, candidate_option, value, iters, latest_result, self.new_options = \
+                        self._run_optimal_feasibility(option, one_iter=True)
                     if (is_max and value > self.optimal_value) or (not is_max and value < self.optimal_value):
-                        self.optimal_value = value
-                        self.optimal_option = candidate_option
-                        self.optimal_iterations = iters
+                        if candidate_option is not None:
+                            self.optimal_value = value
+                            self.optimal_option = candidate_option
+                            self.optimal_iterations = iters
 
-                        hole_options_map = self._violation_property_update(
-                            self.optimal_value, self.oracle, hole_options_map
-                        )
-                        # TODO: check it and append to CEGAR
-                        self.oracle.latest_results.append(latest_result)
-                        optimal_iter = True
+                        if candidate_option is not None:
+                            hole_options_map = self._violation_property_update(
+                                self.optimal_value, self.oracle, hole_options_map
+                            )
+                            # TODO: check it and append to CEGAR
+                            self.oracle.latest_results.append(latest_result)
+                            optimal_iter = True
                 else:
                     logger.debug("Satisfying.")
                     self.satisfying_assignment = option.pick_one_in_family()
@@ -275,7 +277,7 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         # cegar/cegis stats
         self.stage_time_cegar, self.stage_pruned_cegar, self.stage_time_cegis, self.stage_pruned_cegis = 0, 0, 0, 0
         # multiplier to derive time allocated for cegis; =1 is fair, <1 favours cegar, >1 favours cegis
-        self.cegis_allocated_time_factor = 1
+        self.cegis_allocated_time_factor = 1.0
         # start with CEGAR
         self.stage_cegar = True
         # TODO: Check initial values
@@ -468,8 +470,9 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         )
         assert len(hole_options_map) == len(problems)
         problems = [(o, f, b, s) for (o, f), (_, _, b, s) in zip(hole_options_map, problems)]
-        problem[1][-1] = True if len(formulae) == len(self._properties) else problem[1][-1]
-        if not len(formulae) == len(self._properties):
+        if len(formulae) == len(self._properties) and len(problem[1]) > 0:
+            problem[1][-1] = True
+        else:
             problem[1].append(True)
         return problems, problem
 
@@ -517,6 +520,7 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         # get satisfiable assignments (withing the subfamily)
         solver_result = self.solver.check(family_encoding)
         while solver_result == z3.sat:
+            models_pruned = 0
             self.cegis_iterations += 1
             logger.info("CEGIS iteration {}.".format(self.cegis_iterations))
 
@@ -548,10 +552,16 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
                     ))
                     self.solver.add(clause)
 
+                    # estimate number of (virtually) pruned models
+                    models_pruned = 1
+                    irrelevant_holes = set(relevant_holes) - set(conflict)
+                    for hole in irrelevant_holes:
+                        models_pruned *= len(family[hole])
+
                     # compare to maxsat, state exploration, naive hole exploration, global vs local bounds
-                    self.ce_quality_measure(
-                        instance, relevant_holes, counterexamples[index], dtmc, conflict, dtmc_result, index
-                    )
+                    # self.ce_quality_measure(
+                    #     instance, relevant_holes, counterexamples[index], dtmc, conflict, dtmc_result, index
+                    # )
 
             if all(satisfied):  # SAT
                 if self.input_has_optimality_property():
@@ -581,7 +591,7 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
             solver_result = self.solver.check(family_encoding)
 
             # record stage
-            if self.stage_step(0):
+            if self.stage_step(models_pruned):
                 # switch requested
                 assert self.stage_cegar
                 return False, problems, problem
@@ -662,8 +672,8 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
                     logger.debug("Undecided.")
                     models_pruned = 0
                     assert (len(self.new_options) == 2)
-                    # problems.append((family, undecided_formulae[:], bound, self.new_options[:]))  # DFS
-                    problems = [(family, undecided_formulae[:], bound, self.new_options)] + problems  # BFS
+                    problems.append((family, undecided_formulae[:], bound, self.new_options[:]))  # DFS
+                    # problems = [(family, undecided_formulae[:], bound, self.new_options)] + problems  # BFS
                     self.new_options = None
                     if self.global_mdp is None:
                         self.ce_quality_global(self.mdp, self.mdp_mc_results)
@@ -682,6 +692,7 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
                     logger.debug("Stage interrupted.")
                     problems.append(problem)
 
+        assert len(problems) == 0 or self.satisfying_assignment
         return self.compose_result([])
 
     def run(self):
