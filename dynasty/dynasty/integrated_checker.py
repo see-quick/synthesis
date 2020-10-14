@@ -553,10 +553,10 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
                     self.solver.add(clause)
 
                     # estimate number of (virtually) pruned models
-                    models_pruned = 1
-                    irrelevant_holes = set(relevant_holes) - set(conflict)
-                    for hole in irrelevant_holes:
-                        models_pruned *= len(family[hole])
+                    # models_pruned = 1
+                    # irrelevant_holes = set(relevant_holes) - set(conflict)
+                    # for hole in irrelevant_holes:
+                    #     models_pruned *= len(family[hole])
 
                     # compare to maxsat, state exploration, naive hole exploration, global vs local bounds
                     # self.ce_quality_measure(
@@ -591,7 +591,7 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
             solver_result = self.solver.check(family_encoding)
 
             # record stage
-            if self.stage_step(models_pruned):
+            if self.stage_step(0):
                 # switch requested
                 assert self.stage_cegar
                 return False, problems, problem
