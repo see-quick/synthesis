@@ -19,6 +19,7 @@ class Synthesiser(FamilyChecker):
     """
     Class that constructs new candidates to be verified.
     """
+
     def __init__(self, check_prerequisites=False, threads=1, add_cuts=True):
         super().__init__(check_prerequisites)
         self.template_meta_vars = OrderedDict()
@@ -115,8 +116,8 @@ class Synthesiser(FamilyChecker):
 
         self.stats.total_time = time.time() - synthesis_time
         concr.wait(futures)
-        return bool(self.result), self.result, self._verifier.optimal_value, self.stats.iterations \
-            if self.result is not None else None
+        sat = bool(self.result) or self.input_has_optimality_property()
+        return sat, self.result, self._verifier.optimal_value, self.stats.iterations
 
     def build_instance(self, assignments):
         """
@@ -202,9 +203,11 @@ class Synthesiser(FamilyChecker):
         if qualitative:
             conflicts.add(tuple(self.holes.keys()))
             self.stats.qualitative_iterations += 1
-        if len(conflicts) == 0:
+        if len(conflicts) == 0 and self._optimality_setting is None:
             self.result = assignments
         else:
+            if len(conflicts) == 0 and self._optimality_setting is not None:
+                conflicts = {tuple(assignments.keys())}
             for conflict in conflicts:
                 if len(conflict) < len(self.template_meta_vars):
                     self.stats.non_trivial_cex += 1

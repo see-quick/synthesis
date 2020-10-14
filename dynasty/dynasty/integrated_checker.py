@@ -80,7 +80,7 @@ class Statistic:
         self.optimal_value = optimal_value
 
     def __str__(self):
-        is_feasible = "feasible" if self.result else "unfeasible"
+        is_feasible = "feasible" if self.result or self.optimal_value else "unfeasible"
         return f"> {self.method}: " \
                f"{is_feasible} ({self.iterations} iters, {round(self.timer.time, 2)} sec, opt: {self.optimal_value})\n"
 

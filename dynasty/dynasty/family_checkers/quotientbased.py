@@ -225,7 +225,7 @@ class LiftingChecker(QuotientBasedFamilyChecker):
                 else:
                     logger.debug("Satisfying.")
                     if self.input_has_optimality_property():
-                        sat, hole_option, value, iters, _ = self._run_optimal_feasibility(hole_options[0])
+                        sat, hole_option, value, iters, _, _ = self._run_optimal_feasibility(hole_options[0])
                         if (self._optimality_setting.direction == "max" and value > optimal_value) or \
                                 (self._optimality_setting.direction == "min" and value < optimal_value):
                             optimal_value = value
