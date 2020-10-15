@@ -152,7 +152,7 @@ class LiftingChecker(QuotientBasedFamilyChecker):
         if self.first_vp:
             self.properties.append(violation_property)
         elif len(self.properties):
-            self.properties[len(self._properties) - 1] = violation_property
+            self.properties[len(self.properties) - 1] = violation_property
 
     def _violation_property_update(self, optimal_value, oracle, hole_options_map):
         vp = self._construct_violation_property(optimal_value)
@@ -160,7 +160,6 @@ class LiftingChecker(QuotientBasedFamilyChecker):
         self.initialise()
         oracle.prepare(self.mc_formulae, self.mc_formulae_alt, self._engine)
         hole_options_map = [(o, f + [True] if self.first_vp else f[:-1] + [True]) for (o, f) in hole_options_map]
-        self.first_vp = False if self.first_vp else self.first_vp
         return hole_options_map
 
     @staticmethod
@@ -234,6 +233,7 @@ class LiftingChecker(QuotientBasedFamilyChecker):
                         nr_options_remaining, hole_options_map = \
                             self._get_new_options_map(nr_options_remaining, hole_options_map)
                         hole_options_map = self._violation_property_update(optimal_value, oracle, hole_options_map)
+                        self.first_vp = False if self.first_vp else self.first_vp
                     else:
                         return True, hole_options[0].pick_one_in_family(), None, iterations
 
@@ -260,6 +260,7 @@ class LiftingChecker(QuotientBasedFamilyChecker):
         logger.info(f"Total number of options: {nr_options_remaining}")
         self._set_optimality_setting()
         is_max = self._optimality_setting.direction == "max"
+        improved = False
 
         while True:
             iterations, oracle, threshold_synthesis_results = self._perform_analysis(
@@ -318,7 +319,7 @@ class LiftingChecker(QuotientBasedFamilyChecker):
         # TODO: which member of the family has optimal solution
         hole_options = hole_options_next_round if next_round is not None else hole_options
         assert len(oracle.latest_results) == 1
-        return True, optimal_hole_option.pick_one_in_family() if optimal_hole_option is not None else None, \
+        return improved, optimal_hole_option.pick_one_in_family() if optimal_hole_option is not None else None, \
             self.thresholds[0], iterations, oracle.latest_results[0], hole_options
 
     def _perform_analysis(self, iterations, hole_options, hole_options_next_round, oracle):

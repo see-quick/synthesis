@@ -81,7 +81,7 @@ class Statistic:
 
     def __str__(self):
         is_feasible = "feasible" if self.result or self.optimal_value else "unfeasible"
-        return f"> {self.method}: " \
+        return f">> {self.method}: " \
                f"{is_feasible} ({self.iterations} iters, {round(self.timer.time, 2)} sec, opt: {self.optimal_value})\n"
 
 
@@ -155,24 +155,26 @@ class CEGARChecker(LiftingChecker):
                 [idx for idx, r in enumerate(threshold_synthesis_results) if r == ThresholdSynthesisResult.UNDECIDED]
             if undecided_indices:
                 logger.debug("Undecided.")
-                self.new_options = self.cegar_split_option(option, undecided_indices[0])
+                self.new_options = self.cegar_split_option(option)
             else:
                 if self.input_has_optimality_property():
                     sat, candidate_option, value, iters, latest_result, self.new_options = \
                         self._run_optimal_feasibility(option, one_iter=True)
-                    if (is_max and value > self.optimal_value) or (not is_max and value < self.optimal_value):
-                        if candidate_option is not None:
-                            self.optimal_value = value
-                            self.optimal_option = candidate_option
-                            self.optimal_iterations = iters
+                    print(f">> OPTIMAL VALUE AT CEGAR {value}.")
+                    # if (is_max and value > self.optimal_value) or (not is_max and value < self.optimal_value):
+                    if sat:
+                        print(f">> NEW OPTIMAL VALUE AT CEGAR {value}.")
+                        self.optimal_value = value
+                        self.optimal_option = candidate_option
+                        self.optimal_iterations = iters
 
-                        if candidate_option is not None:
-                            hole_options_map = self._violation_property_update(
-                                self.optimal_value, self.oracle, hole_options_map
-                            )
-                            # TODO: check it and append to CEGAR
-                            self.oracle.latest_results.append(latest_result)
-                            optimal_iter = True
+                        hole_options_map = self._violation_property_update(
+                            self.optimal_value, self.oracle, hole_options_map
+                        )
+                        # TODO: check it and append to CEGAR
+                        self.oracle.latest_results.append(latest_result)
+                        optimal_iter = True and self.first_vp
+                        self.first_vp = False if self.first_vp else self.first_vp
                 else:
                     logger.debug("Satisfying.")
                     self.satisfying_assignment = option.pick_one_in_family()
@@ -496,7 +498,7 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
             self.stage_switch_allowed = False
 
         # list of relevant holes (open constants) in this subfamily
-        relevant_holes = [hole for hole in self.holes if len(family[hole]) > 1]
+        relevant_holes = [hole for hole in self.holes if len(family[hole]) > 0]
 
         # encode family
         family_clauses = dict()
@@ -520,7 +522,6 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         # get satisfiable assignments (withing the subfamily)
         solver_result = self.solver.check(family_encoding)
         while solver_result == z3.sat:
-            models_pruned = 0
             self.cegis_iterations += 1
             logger.info("CEGIS iteration {}.".format(self.cegis_iterations))
 
@@ -570,13 +571,15 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
                             dtmc_result.at(dtmc.initial_states[0]), self.optimal_value
                     ):
                         logger.debug("Optimal value improved to {}.".format(dtmc_result.at(dtmc.initial_states[0])))
+                        print(f">> OPTIMAL VALUE AT CEGIS {dtmc_result.at(dtmc.initial_states[0])}.")
                         self.optimal_value = dtmc_result.at(dtmc.initial_states[0])
                         self.optimal_option = hole_assignments
                         problems, problem = self._update_problems(problems, problem, formulae)
+                        self.first_vp = False if self.first_vp else self.first_vp
                         counterexamples.append(self._construct_violation_ce(family, relevant_holes_flatset))
                     else:
                         logger.debug("Optimal value ({}) not improved, conflict analysis!".format(self.optimal_value))
-                        counterexamples.append(self._construct_violation_ce(family, relevant_holes_flatset))
+                        # counterexamples.append(self._construct_violation_ce(family, relevant_holes_flatset))
                         critical_edges = counterexamples[-1].construct_via_holes(dtmc, True)
                         conflict = critical_edges
                         clause = z3.Not(z3.And(
@@ -610,6 +613,31 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
                 k += 1
             self.hole_option_indices[hole] = indices
 
+    @staticmethod
+    def _check_family(family):
+        result = {
+            "M_0_1": 1, "M_0_2": 2, "M_0_3": 0, "M_0_4": 0, "M_0_5": 1, "M_0_6": 0, "M_1_1": 0, "M_1_2": 1,
+            "M_1_3": 0, "M_1_4": 0, "M_1_5": 2, "M_1_6": 0, "M_2_1": 1, "M_2_2": 1, "M_2_3": 0, "M_2_4": 0,
+            "M_2_5": 2, "M_2_6": 0, "P_0_1": 2, "P_0_2": 2, "P_0_3": 2, "P_0_4": 3, "P_0_5": 3, "P_1_1": 2,
+            "P_1_2": 4, "P_1_3": 2, "P_1_4": 3, "P_1_5": 3, "P_2_1": 2, "P_2_2": 2, "P_2_3": 3, "P_2_4": 1,
+            "P_2_5": 1
+        }
+        result = {"M_0_1": [0], "M_0_2": [0], "M_0_3": [2], "M_0_4": [2], "M_0_5": [0], "M_0_6": [0], "M_1_1": [0],
+                  "M_1_2": [0], "M_1_3": [2], "M_1_4": [2], "M_1_5": [2], "M_1_6": [0, 1, 2], "M_2_1": [0,1,2],
+                  "M_2_2": [0,1], "M_2_3": [2], "M_2_4": [1,2], "M_2_5": [2], "M_2_6": [0,1,2], "P_0_1": [2],
+                  "P_0_2": [2], "P_0_3": [3], "P_0_4": [4], "P_0_5": [1], "P_1_1": [2], "P_1_2": [4], "P_1_3": [3],
+                  "P_1_4": [4], "P_1_5": [3], "P_2_1": [2,3], "P_2_2": [4], "P_2_3": [3], "P_2_4": [4], "P_2_5": [3]
+          }
+
+        for k, v in family.items():
+            v = [int(str(a)) for a in v]
+            # if result[k] in v:
+            if (all(x in v for x in result[k])) or result[k] == v or (all(x in result[k] for x in v)):
+                continue
+            else:
+                return False
+        return True
+
     def run_feasibility(self):
         """Run feasibility synthesis."""
         logger.info("Running feasibility synthesis.")
@@ -621,7 +649,7 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         builder_options = stormpy.BuilderOptions(raw_formulae)
         builder_options.set_build_with_choice_origins(True)
         builder_options.set_build_state_valuations(True)
-        builder_options.set_add_overlapping_guards_label()
+        # builder_options.set_add_overlapping_guards_label()
 
         # initialize solver describing the family and counterexamples
         # note: restricting to subfamilies is encoded separately
@@ -645,6 +673,9 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
             # pick a family
             problem = problems[-1]
             family, formulae, bound, subfamilies = problem
+
+            # flag = self._check_family(family)
+
             family_size = family.size()
             logger.info("Analysing subfamily of size {}.".format(family_size))
 
@@ -686,7 +717,7 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
                     logger.debug("Sat")
                     break
                 if analysis_success:
-                    logger.debug("Unsat")
+                    logger.debug("CEGIS Unsat")
                     self.stage_step(family_size)
                 else:  # stage unsuccessful: leave the family to cegar; note: phase switched implicitly
                     logger.debug("Stage interrupted.")
