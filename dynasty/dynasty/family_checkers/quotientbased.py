@@ -14,7 +14,7 @@ from dynasty.jani.jani_quotient_builder import JaniQuotientBuilder, ModelHandlin
 from dynasty.jani.quotient_container import ThresholdSynthesisResult as ThresholdSynthesisResult
 from dynasty.family_checkers.familychecker import FamilyChecker, HoleOptions
 
-logger = logging.getLogger(__file__)
+logger = logging.getLogger(__name__)
 
 
 class QuotientBasedFamilyChecker(FamilyChecker):

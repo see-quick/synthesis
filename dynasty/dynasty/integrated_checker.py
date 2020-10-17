@@ -11,7 +11,7 @@ from dynasty.family_checkers.cegis import Synthesiser
 from dynasty.family_checkers.quotientbased import LiftingChecker
 from dynasty.jani.jani_quotient_builder import JaniQuotientBuilder, ThresholdSynthesisResult
 
-logger = logging.getLogger(__file__)
+logger = logging.getLogger(__name__)
 
 
 def check_model(model, property_obj, quantitative=False):
@@ -81,7 +81,7 @@ class Statistic:
 
     def __str__(self):
         is_feasible = "feasible" if self.result or self.optimal_value else "unfeasible"
-        return f">> {self.method}: " \
+        return f">>> {self.method}: " \
                f"{is_feasible} ({self.iterations} iters, {round(self.timer.time, 2)} sec, opt: {self.optimal_value})\n"
 
 
@@ -706,8 +706,7 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
                     problems.append((family, undecided_formulae[:], bound, self.new_options[:]))  # DFS
                     # problems = [(family, undecided_formulae[:], bound, self.new_options)] + problems  # BFS
                     self.new_options = None
-                    if self.global_mdp is None:
-                        self.ce_quality_global(self.mdp, self.mdp_mc_results)
+                    self.ce_quality_global(self.mdp, self.mdp_mc_results)
                 self.stage_step(models_pruned)
 
             else:  # CEGIS

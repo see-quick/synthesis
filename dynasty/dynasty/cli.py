@@ -27,7 +27,7 @@ def setup_logger(log_path):
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
 
-    formatter = logging.Formatter('%(asctime)s %(threadName)s - %(name)s - %(levelname)s - %(message)s')
+    formatter = logging.Formatter('%(name)s - %(levelname)s - %(message)s')
 
     handlers = []
     if log_path:
