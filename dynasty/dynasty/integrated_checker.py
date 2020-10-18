@@ -81,7 +81,7 @@ class Statistic:
 
     def __str__(self):
         is_feasible = "feasible" if self.result or self.optimal_value else "unfeasible"
-        return f">>> {self.method}: " \
+        return f"> {self.method}: " \
                f"{is_feasible} ({self.iterations} iters, {round(self.timer.time, 2)} sec, opt: {self.optimal_value})\n"
 
 
@@ -160,10 +160,7 @@ class CEGARChecker(LiftingChecker):
                 if self.input_has_optimality_property():
                     sat, candidate_option, value, iters, latest_result, self.new_options = \
                         self._run_optimal_feasibility(option, one_iter=True)
-                    print(f">> OPTIMAL VALUE AT CEGAR {value}.")
-                    # if (is_max and value > self.optimal_value) or (not is_max and value < self.optimal_value):
-                    if sat:
-                        print(f">> NEW OPTIMAL VALUE AT CEGAR {value}.")
+                    if (is_max and value > self.optimal_value) or (not is_max and value < self.optimal_value):
                         self.optimal_value = value
                         self.optimal_option = candidate_option
                         self.optimal_iterations = iters
@@ -273,16 +270,12 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         self.stage_timer = Timer()
         self.stage_switch_allowed = True  # once a method wins, set this to false and do not switch between methods
         self.stage_score = 0  # +1 point whenever cegar wins the stage, -1 otherwise
-        # cegar wins over cegis by reaching this limit, cegis wins by reaching the negative
-        # TODO: note: this is the only parameter in the integrated synthesis
-        # self.stage_score_limit = None
         # cegar/cegis stats
         self.stage_time_cegar, self.stage_pruned_cegar, self.stage_time_cegis, self.stage_pruned_cegis = 0, 0, 0, 0
         # multiplier to derive time allocated for cegis; =1 is fair, <1 favours cegar, >1 favours cegis
         self.cegis_allocated_time_factor = 1.0
         # start with CEGAR
         self.stage_cegar = True
-        # TODO: Check initial values
         self.cegis_allocated_time = 0
         self.stage_time_allocation_cegis = 0
         # CE quality
@@ -453,9 +446,8 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
 
     # ----- CE quality ----- #
 
-    def _construct_violation_ce(self, family, relevant_holes_flatset):
+    def _construct_violation_cex(self, family, relevant_holes_flatset):
         vp = self._construct_violation_property(self.optimal_value)
-
         self._set_optimality_setting()
         analyse_result = self._analyse_from_scratch(self._open_constants, family, set())
         mdp_result = analyse_result.latest_results[0].result
@@ -485,6 +477,16 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         self.properties = self.properties[:-1] if len(mdp_results) + 1 == len(self.properties) else self.properties
         assert len(mdp_results) == len(self.properties)
 
+    def _construct_cex_for_index(self, counterexamples, dtmc, family_clauses, sat_model, index):
+        conflict = counterexamples[index].construct_via_holes(dtmc, True)
+        # add new clause
+        cex_clauses = family_clauses.copy()
+        for var, hole in self.template_meta_vars.items():
+            if hole in conflict:
+                cex_clauses[hole] = (var == sat_model[var])
+        counterexample_encoding = z3.Not(z3.And(list(cex_clauses.values())))
+        self.solver.add(counterexample_encoding)
+
     def cegis_analyse_family(self, builder_options, problems):
         """Analyse a family using provided mdp data to construct generalized counterexamples."""
         logger.debug("CEGIS stage.")
@@ -498,7 +500,7 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
             self.stage_switch_allowed = False
 
         # list of relevant holes (open constants) in this subfamily
-        relevant_holes = [hole for hole in self.holes if len(family[hole]) > 0]
+        relevant_holes = [hole for hole in self.holes if len(family[hole]) > 1]
 
         # encode family
         family_clauses = dict()
@@ -546,12 +548,7 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
                 dtmc_sat, dtmc_result = check_model(dtmc, prop, quantitative=True)
                 satisfied.append(dtmc_sat)
                 if not dtmc_sat:
-                    critical_edges = counterexamples[index].construct_via_holes(dtmc, True)
-                    conflict = critical_edges
-                    clause = z3.Not(z3.And(
-                        [var == sat_model[var] for var, hole in self.template_meta_vars.items() if hole in conflict]
-                    ))
-                    self.solver.add(clause)
+                    self._construct_cex_for_index(counterexamples, dtmc, family_clauses, sat_model, index)
 
                     # estimate number of (virtually) pruned models
                     # models_pruned = 1
@@ -571,21 +568,17 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
                             dtmc_result.at(dtmc.initial_states[0]), self.optimal_value
                     ):
                         logger.debug("Optimal value improved to {}.".format(dtmc_result.at(dtmc.initial_states[0])))
-                        print(f">> OPTIMAL VALUE AT CEGIS {dtmc_result.at(dtmc.initial_states[0])}.")
                         self.optimal_value = dtmc_result.at(dtmc.initial_states[0])
                         self.optimal_option = hole_assignments
                         problems, problem = self._update_problems(problems, problem, formulae)
                         self.first_vp = False if self.first_vp else self.first_vp
-                        counterexamples.append(self._construct_violation_ce(family, relevant_holes_flatset))
+                        counterexamples.append(self._construct_violation_cex(family, relevant_holes_flatset))
                     else:
                         logger.debug("Optimal value ({}) not improved, conflict analysis!".format(self.optimal_value))
-                        # counterexamples.append(self._construct_violation_ce(family, relevant_holes_flatset))
-                        critical_edges = counterexamples[-1].construct_via_holes(dtmc, True)
-                        conflict = critical_edges
-                        clause = z3.Not(z3.And(
-                            [var == sat_model[var] for var, hole in self.template_meta_vars.items() if hole in conflict]
-                        ))
-                        self.solver.add(clause)
+                        counterexamples.append(self._construct_violation_cex(family, relevant_holes_flatset))
+                        self._construct_cex_for_index(
+                            counterexamples, dtmc, family_clauses, sat_model, len(counterexamples) - 1
+                        )
                 else:
                     self.satisfying_assignment = hole_assignments
                     break
@@ -613,31 +606,6 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
                 k += 1
             self.hole_option_indices[hole] = indices
 
-    @staticmethod
-    def _check_family(family):
-        result = {
-            "M_0_1": 1, "M_0_2": 2, "M_0_3": 0, "M_0_4": 0, "M_0_5": 1, "M_0_6": 0, "M_1_1": 0, "M_1_2": 1,
-            "M_1_3": 0, "M_1_4": 0, "M_1_5": 2, "M_1_6": 0, "M_2_1": 1, "M_2_2": 1, "M_2_3": 0, "M_2_4": 0,
-            "M_2_5": 2, "M_2_6": 0, "P_0_1": 2, "P_0_2": 2, "P_0_3": 2, "P_0_4": 3, "P_0_5": 3, "P_1_1": 2,
-            "P_1_2": 4, "P_1_3": 2, "P_1_4": 3, "P_1_5": 3, "P_2_1": 2, "P_2_2": 2, "P_2_3": 3, "P_2_4": 1,
-            "P_2_5": 1
-        }
-        result = {"M_0_1": [0], "M_0_2": [0], "M_0_3": [2], "M_0_4": [2], "M_0_5": [0], "M_0_6": [0], "M_1_1": [0],
-                  "M_1_2": [0], "M_1_3": [2], "M_1_4": [2], "M_1_5": [2], "M_1_6": [0, 1, 2], "M_2_1": [0,1,2],
-                  "M_2_2": [0,1], "M_2_3": [2], "M_2_4": [1,2], "M_2_5": [2], "M_2_6": [0,1,2], "P_0_1": [2],
-                  "P_0_2": [2], "P_0_3": [3], "P_0_4": [4], "P_0_5": [1], "P_1_1": [2], "P_1_2": [4], "P_1_3": [3],
-                  "P_1_4": [4], "P_1_5": [3], "P_2_1": [2,3], "P_2_2": [4], "P_2_3": [3], "P_2_4": [4], "P_2_5": [3]
-          }
-
-        for k, v in family.items():
-            v = [int(str(a)) for a in v]
-            # if result[k] in v:
-            if (all(x in v for x in result[k])) or result[k] == v or (all(x in result[k] for x in v)):
-                continue
-            else:
-                return False
-        return True
-
     def run_feasibility(self):
         """Run feasibility synthesis."""
         logger.info("Running feasibility synthesis.")
@@ -649,7 +617,7 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         builder_options = stormpy.BuilderOptions(raw_formulae)
         builder_options.set_build_with_choice_origins(True)
         builder_options.set_build_state_valuations(True)
-        # builder_options.set_add_overlapping_guards_label()
+        builder_options.set_add_overlapping_guards_label()
 
         # initialize solver describing the family and counterexamples
         # note: restricting to subfamilies is encoded separately
@@ -673,9 +641,6 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
             # pick a family
             problem = problems[-1]
             family, formulae, bound, subfamilies = problem
-
-            # flag = self._check_family(family)
-
             family_size = family.size()
             logger.info("Analysing subfamily of size {}.".format(family_size))
 

@@ -1,0 +1,11 @@
+HERMAN-SEB-GO1: OPTIMAL SYNTHESIS
+    OPTIMAL PROPERTY: P=? [ F "stable" & syncs <= CMAX-1 ]
+    CMAX=6; RELATIVE=0.0
+Hybrid: feasible ((15592, 0) iters, 38052.72 sec, opt: 0.9183194991674144); only CEGAR in hybrid
+Hybrid: feasible ((1812, 6491) iters, 13691.98 sec, opt: 0.9183194991674144); score_level=99999
+
+HERMAN-SEB-GO1: FEASIBILITY SYNTHESIS
+    PROPERTY: P>=THRESHOLD [ F "stable" & syncs <= CMAX-1 ]
+    CMAX=6; THRESHOLD=0.9183194992
+Hybrid: unfeasible ((1016, 3894) iters, 7447.2 sec, opt: None)
+CEGAR: unfeasible (14157 iters, 34746.6 sec, opt: None)
