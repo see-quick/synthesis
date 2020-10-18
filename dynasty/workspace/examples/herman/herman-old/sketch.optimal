@@ -1,3 +1,0 @@
-max
-relative 0.05
-P=? [ F "stable" & syncs <= 1 ]
