@@ -1,11 +1,30 @@
-HERMAN-SEB-GO1: OPTIMAL SYNTHESIS
+HERMAN/2GO1: OPTIMAL SYNTHESIS
     OPTIMAL PROPERTY: P=? [ F "stable" & syncs <= CMAX-1 ]
     CMAX=6; RELATIVE=0.0
 Hybrid: feasible ((15592, 0) iters, 38052.72 sec, opt: 0.9183194991674144); only CEGAR in hybrid
 Hybrid: feasible ((1812, 6491) iters, 13691.98 sec, opt: 0.9183194991674144); score_level=99999
 
-HERMAN-SEB-GO1: FEASIBILITY SYNTHESIS
+HERMAN/2GO1: FEASIBILITY SYNTHESIS
     PROPERTY: P>=THRESHOLD [ F "stable" & syncs <= CMAX-1 ]
     CMAX=6; THRESHOLD=0.9183194992
 Hybrid: unfeasible ((1016, 3894) iters, 7447.2 sec, opt: None)
 CEGAR: unfeasible (14157 iters, 34746.6 sec, opt: None)
+
+HERMAN/ORIG: OPTIMAL SYNTHESIS
+    OPTIMAL PROPERTY: P=? [ F "stable" & syncs <= CMAX-1 ]
+    CMAX=6; RELATIVE=0.0
+Hybrid: feasible ((217, 459) iters, 1618.49 sec, opt: 0.948667086479702)
+CEGAR: feasible (498 iters, 1227.55 sec, opt: 0.948667086479702); research: regtime=2
+CEGAR: feasible (534 iters, 1322.19 sec, opt: 0.948667086479702)
+
+HERMAN/ORIG: FEASIBILITY SYNTHESIS
+    PROPERTY: P>=THRESHOLD [ F "stable" & syncs <= CMAX-1 ]
+    CMAX=6; THRESHOLD=0.9486670865
+Hybrid: unfeasible ((194, 421) iters, 1075.89 sec, opt: None)
+CEGAR: unfeasible (471 iters, 977.66 sec, opt: None)
+
+MAZE/XXL: OPTIMAL SYNTHESIS
+    OPTIMAL PROPERTY: P=? [ F "goal" & c < CMAX/2 ]
+    CMAX=50; RELATIVE=0.0
+Hybrid: feasible ((80691, 78359) iters, 58276.27 sec, opt: 0.993457367152921)
+CEGAR: feasible (112261 iters, 20600.45 sec, opt: 0.9934576412200337)

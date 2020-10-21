@@ -279,10 +279,13 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         self.cegis_allocated_time = 0
         self.stage_time_allocation_cegis = 0
         # CE quality
-        self.ce_maxsat, self.ce_zero, self.ce_global, self.ce_holes, self.ce_states = 0, 0, 0, 0, 0
+        self.ce_maxsat, self.ce_zero, self.ce_global, self.ce_local, self.ce_holes, self.ce_states = 0, 0, 0, 0, 0, 0
+        self.ce_maxsat_timer, self.ce_zero_timer, self.ce_global_timer, self.ce_local_timer = \
+            Timer(), Timer(), Timer(), Timer()
         self.global_mdp = None
         self.global_mdp_results = []
         self.counterexamples_global = []
+        self.ce_quality_compute = False
 
     def stage_start(self, request_stage_cegar):
         self.stage_cegar = request_stage_cegar
@@ -313,7 +316,7 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
 
     def cegar_analyse_option(self, problems, last=True):
         """Analyse region and store mdp data."""
-        hole_options_map = [(option, formulae) for (option, formulae, _, _) in problems]
+        hole_options_map = [(option, formulae[:]) for (option, formulae, _, _) in problems]
         undecided_formulae, hole_options_map = CEGARChecker.cegar_analyse_option(self, hole_options_map, last=True)
         problems = [(o, f, b, s) for (o, f), (_, _, b, s) in zip(hole_options_map, problems[:-1])]
         self.cegar_iterations += 1
@@ -397,28 +400,36 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
     # ----- CE quality ----- #
 
     def ce_quality_global(self, mdp, mdp_results):
-        self.global_mdp = mdp
-        self.global_mdp_results = mdp_results[:]
+        if not(not self.ce_quality_compute or self.global_mdp is not None):
+            self.global_mdp = mdp
+            self.global_mdp_results = mdp_results[:]
 
-    def ce_quality_measure(self, instance, relevant_holes, counterexample, dtmc, conflict, dtmc_result, idx):
+    def ce_quality_measure(self, instance, relevant_holes, counterexample, dtmc, idx):
+        if not self.ce_quality_compute:
+            return
         self.statistic.timer.stop()
         self.stage_timer.stop()
 
-        ce_states = counterexample.construct_via_states(dtmc, dtmc_result, 1, 99999)
-        conflict_states = self.relevant_holes(ce_states, relevant_holes)
-        self.ce_states += len(conflict_states) / len(relevant_holes)
+        # maxsat
+        self.ce_maxsat_timer.start()
         _, conflict_maxsat = self.verifier.naive_check(instance, all_conflicts=True, check_conflicts=False)
         conflict_maxsat = [hole for hole in conflict_maxsat if hole in relevant_holes]
-        conflict_zero = counterexample.construct_via_holes(dtmc, False)
-        # TODO: Segmentation fault
-        # conflict_global = self.counterexamples_global[idx].construct_via_holes(dtmc, True)
-
         self.ce_maxsat += len(conflict_maxsat) / len(relevant_holes)
-        self.ce_zero += len(conflict_zero) / len(relevant_holes)
-        # self.ce_global += len(conflict_global) / len(relevant_holes)
-        self.ce_holes += len(conflict) / len(relevant_holes)
-        print(f"> {self.ce_maxsat / self.cegis_iterations} vs {self.ce_holes / self.cegis_iterations}")
+        self.ce_maxsat_timer.stop()
 
+        # zero
+        self.ce_zero_timer.start()
+        conflict_zero = counterexample.construct_via_holes(dtmc, False)
+        self.ce_zero += len(conflict_zero) / len(relevant_holes)
+        self.ce_zero_timer.stop()
+
+        # global
+        self.ce_global_timer.start()
+        conflict_global = self.counterexamples_global[idx].construct_via_holes(dtmc, True)
+        self.ce_global += len(conflict_global) / len(relevant_holes)
+        self.ce_global_timer.stop()
+
+        # resume timers and compute normal bounds
         self.stage_timer.start()
         self.statistic.timer.start()
 
@@ -428,20 +439,25 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         self.ce_local += len(conflict_local) / len(relevant_holes)
         self.ce_local_timer.stop()
 
-        # print("> {} vs {}".format(self.ce_maxsat / self.cegis_iterations, self.ce_local / self.cegis_iterations))
-
-        # resume timers
-        self.stage_timer.start()
-        self.statistic.timer.start()
+        print(f"> {self.ce_maxsat / self.cegis_iterations} vs {self.ce_local / self.cegis_iterations}")
 
 
     def ce_quality_print(self):
-        if self.cegis_iterations == 0:
+        if not self.ce_quality_compute:
+            return
+        if self.cegis_iterations < 2:
             print("> ce quality: n/a")
         else:
             print(
-                f"> ce quality: {self.ce_maxsat / self.cegis_iterations} - {self.ce_zero / self.cegis_iterations} - "
-                f"{self.ce_global / self.cegis_iterations} - {self.ce_holes / self.cegis_iterations}"
+                f"> ce quality: {self.ce_maxsat / self.cegis_iterations:1.4f} - "
+                f"{self.ce_zero / self.cegis_iterations:1.4fs} - {self.ce_global / self.cegis_iterations:1.4f} - "
+                f"{self.ce_holes / self.cegis_iterations:1.4f}"
+            )
+            print(f"> ce time: "
+                  f"{self.ce_maxsat_timer.read() / self.cegis_iterations:1.4f} - "
+                  f"{self.ce_zero_timer.read() / self.cegis_iterations:1.4f} - "
+                  f"{self.ce_global_timer.read() / self.cegis_iterations:1.4f} - "
+                  f"{self.ce_local_timer.read() / self.cegis_iterations:1.4f}"
             )
 
     # ----- CE quality ----- #
@@ -517,9 +533,10 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
                 self.sketch, relevant_holes_flatset, prop.raw_formula, mdp, mdp_result
             ))
             # CE generator for global MDP bounds
-            # self.counterexamples_global.append(stormpy.SynthesisResearchCounterexample(
-            #     self.sketch, relevant_holes_flatset, prop.raw_formula, self.global_mdp, self.global_mdp_results[idx]
-            # ))
+            if self.ce_quality_compute:
+                self.counterexamples_global.append(stormpy.SynthesisResearchCounterexample(
+                    self.sketch, relevant_holes_flatset, prop.raw_formula, self.global_mdp, self.global_mdp_results[idx]
+                ))
 
         # get satisfiable assignments (withing the subfamily)
         solver_result = self.solver.check(family_encoding)
@@ -558,7 +575,7 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
 
                     # compare to maxsat, state exploration, naive hole exploration, global vs local bounds
                     # self.ce_quality_measure(
-                    #     instance, relevant_holes, counterexamples[index], dtmc, conflict, dtmc_result, index
+                    #     instance, relevant_holes, counterexamples[index], dtmc, index
                     # )
 
             if all(satisfied):  # SAT
@@ -667,11 +684,14 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
                 else:
                     logger.debug("Undecided.")
                     models_pruned = 0
-                    assert (len(self.new_options) == 2)
-                    problems.append((family, undecided_formulae[:], bound, self.new_options[:]))  # DFS
+                    # assert (len(self.new_options) == 2)
+                    # the cegar family was splitted
+                    if len(self.new_options) == 2:
+                        problems.append((family, undecided_formulae[:], bound, self.new_options[:]))  # DFS
                     # problems = [(family, undecided_formulae[:], bound, self.new_options)] + problems  # BFS
                     self.new_options = None
-                    self.ce_quality_global(self.mdp, self.mdp_mc_results)
+                    if self.ce_quality_compute:
+                        self.ce_quality_global(self.mdp, self.mdp_mc_results)
                 self.stage_step(models_pruned)
 
             else:  # CEGIS
