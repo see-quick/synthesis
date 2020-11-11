@@ -3,4 +3,5 @@ prerequisites/
 .idea/
 pycarl
 venv/
+venv3.8/
 dynasty/.coverage

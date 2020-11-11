@@ -14,6 +14,9 @@ from dynasty.jani.jani_quotient_builder import JaniQuotientBuilder, ThresholdSyn
 
 logger = logging.getLogger(__name__)
 
+ONLY_CEGAR = False
+ONLY_CEGIS = False
+NONTRIVIAL_BOUNDS = True
 
 def check_model(model, property_obj, quantitative=False):
     """Model check a model against a (quantitative) property."""
@@ -386,8 +389,9 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         self.stage_time_allocation_cegis = cegis_dominance
 
         # stage log
-        print(
-            f"> {success_rate_cegar:.2f} \\\\ {success_rate_cegis:.2f} = {cegis_dominance:.1f} ({self.stage_score})"
+        print("> ", end="")
+        print("{:.2e} \\\\ {:.2e} = {:.1e} ({})".format(
+            success_rate_cegar, success_rate_cegis, cegis_dominance, self.stage_score)
         )
 
         # switch back to cegar
@@ -431,23 +435,22 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         self.ce_global += len(conflict_global) / len(relevant_holes)
         self.ce_global_timer.stop()
 
-        # resume timers and compute normal bounds
-        self.stage_timer.start()
-        self.statistic.timer.start()
-
         # local
         self.ce_local_timer.start()
         conflict_local = counterexample.construct_via_holes(dtmc, True)
         self.ce_local += len(conflict_local) / len(relevant_holes)
         self.ce_local_timer.stop()
 
-        print(f"> {self.ce_maxsat / self.cegis_iterations} vs {self.ce_local / self.cegis_iterations}")
+        # print(f"> {self.ce_maxsat / self.cegis_iterations} vs {self.ce_local / self.cegis_iterations}")
 
+        # resume timers
+        self.stage_timer.start()
+        self.statistic.timer.start()
 
     def ce_quality_print(self):
         if not self.ce_quality_compute:
             return
-        if self.cegis_iterations < 2:
+        if self.cegis_iterations < 1:
             print("> ce quality: n/a")
         else:
             print(
@@ -493,7 +496,7 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         assert len(mdp_results) == len(self.properties)
 
     def _construct_cex_for_index(self, counterexamples, dtmc, family_clauses, sat_model, index):
-        conflict = counterexamples[index].construct_via_holes(dtmc, True)
+        conflict = counterexamples[index].construct_via_holes(dtmc, NONTRIVIAL_BOUNDS)
         # add new clause
         cex_clauses = family_clauses.copy()
         for var, hole in self.template_meta_vars.items():
@@ -510,7 +513,7 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         family, formulae, (mdp, mdp_results), _ = problem
         self._prepare_properties(mdp_results, formulae)
 
-        if self.only_cegis:
+        if ONLY_CEGIS:
             # disallow return to CEGAR
             self.stage_switch_allowed = False
 
@@ -558,23 +561,6 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
             assert dtmc.labeling.get_states("deadlock").number_of_set_bits() == 0
 
             logger.debug("Constructed DTMC of size {}.".format(dtmc.nr_states))
-
-            # cols = []
-            # vals = []
-            # r_size = []
-            # for i in range(0, dtmc.transition_matrix.nr_rows):
-            #     cnt = 0
-            #     row = dtmc.transition_matrix.get_row(i)
-            #     for r in row:
-            #         cnt += 1
-            #         cols.append(r.column)
-            #         vals.append(r.value())
-            #     r_size.append(cnt)
-            # print(f">>> {cols}")
-            # print(f">>> {vals}")
-            # print(f">>> {r_size}")
-            # print(f">>> {len(vals)}")
-            # exit(1)
 
             assert len(dtmc.initial_states) == 1  # to avoid ambiguity
             assert dtmc.initial_states[0] == 0  # should be implied by topological ordering
@@ -672,6 +658,10 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         problems = [(family, formulae, None, None)]
         self.models_total = family.size()
         self.stage_start(request_stage_cegar=True)
+
+        if ONLY_CEGAR:
+            # disallow return to CEGIS
+            self.stage_switch_allowed = False
 
         while problems:
             logger.debug("Current number of problems: {}".format(len(problems)))
