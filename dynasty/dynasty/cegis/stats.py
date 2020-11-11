@@ -61,9 +61,10 @@ class Stats:
 
     def initialize_properties_and_holes(self, properties, holes):
         for p in properties:
-            self._property_stats[p.property.name] = PropertyStats(holes)
-            if p.prerequisite_property:
-                self._property_stats[p.prerequisite_property.name] = PropertyStats(holes)
+            if p is not None:
+                self._property_stats[p.property.name] = PropertyStats(holes)
+                if p.prerequisite_property:
+                    self._property_stats[p.prerequisite_property.name] = PropertyStats(holes)
         self._optimality_stats = PropertyStats(holes)
 
     def report_model_building(self, time, size):

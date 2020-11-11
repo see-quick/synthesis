@@ -31,10 +31,13 @@ class Verifier:
         self._set_cex_options(add_cuts)
 
     def initialise_stats(self, holes):
-        self.stats.initialize_properties_and_holes(self.properties, holes)
+        self.stats.initialize_properties_and_holes(self.get_properties(), holes)
 
     def initialise_optimality(self, optimality_setting):
         self._optimality = optimality_setting
+
+    def get_properties(self):
+        return [p for p in self.properties if p is not None]
 
     @property
     def optimal_value(self):
@@ -158,9 +161,10 @@ class Verifier:
         :return: The Markov chain.
         """
         start_mb = time.time()
-        assert len(self.properties) + len(self.qualitative_properties) > 0 or self._optimality
+        assert len([p for p in self.get_properties()]) + len(self.qualitative_properties) > 0 \
+               or self._optimality
         if with_origins:
-            raw_formulae = [p.property.raw_formula for p in self.properties]
+            raw_formulae = [p.property.raw_formula for p in self.get_properties()]
             if self._optimality:
                 raw_formulae.append(self._optimality.criterion.raw_formula)
             options = stormpy.BuilderOptions(raw_formulae)
@@ -168,7 +172,7 @@ class Verifier:
             options.set_add_overlapping_guards_label()
             model = stormpy.build_sparse_model_with_options(instance, options)
         else:
-            model = stormpy.build_model(instance, [p.property for p in self.properties])
+            model = stormpy.build_model(instance, [p.property for p in self.get_properties()])
 
         self._print_overlapping_guards(model)
 
@@ -205,35 +209,35 @@ class Verifier:
         self.stats.qualitative_model_checking_time += time.time() - start_mc
         if terminate_after_qualitative_violation and len(violated) > 0:
             return qualitative_violation, violated
-        for p in self.properties:
+        for p in self.get_properties():
+            if p is not None:
+                logger.debug("Consider..: {}".format(p.property))
+                # First, we check some prerequisite properties, in case they exist.
+                if p.prerequisite_property:
+                    logger.debug("Prerequisite checking..: {}".format(p.prerequisite_property))
+                    start_mc = time.time()
+                    mc_result = stormpy.model_checking(model, p.prerequisite_property).at(model.initial_states[0])
+                    logger.debug("MC result for prerequisite: {}".format(mc_result))
+                    logger.debug("model states: {}, transitions: {}".format(model.nr_states, model.nr_transitions))
+                    self.stats.report_model_checking(p.prerequisite_property, time.time() - start_mc, not mc_result)
+                    if not mc_result:
+                        violated.append(p.prerequisite_property)
+                        if not check_all:
+                            break
+                        else:
+                            continue
+                else:
+                    logger.debug("No prerequisite found!")
 
-            logger.debug("Consider..: {}".format(p.property))
-            # First, we check some prerequisite properties, in case they exist.
-            if p.prerequisite_property:
-                logger.debug("Prerequisite checking..: {}".format(p.prerequisite_property))
                 start_mc = time.time()
-                mc_result = stormpy.model_checking(model, p.prerequisite_property).at(model.initial_states[0])
-                logger.debug("MC result for prerequisite: {}".format(mc_result))
+                mc_result = stormpy.model_checking(model, p.property).at(model.initial_states[0])
+                logger.debug("MC Result: {}".format(mc_result))
                 logger.debug("model states: {}, transitions: {}".format(model.nr_states, model.nr_transitions))
-                self.stats.report_model_checking(p.prerequisite_property, time.time() - start_mc, not mc_result)
+                self.stats.report_model_checking(p.property, time.time() - start_mc, not mc_result)
                 if not mc_result:
-                    violated.append(p.prerequisite_property)
+                    violated.append(p.property)
                     if not check_all:
                         break
-                    else:
-                        continue
-            else:
-                logger.debug("No prerequisite found!")
-
-            start_mc = time.time()
-            mc_result = stormpy.model_checking(model, p.property).at(model.initial_states[0])
-            logger.debug("MC Result: {}".format(mc_result))
-            logger.debug("model states: {}, transitions: {}".format(model.nr_states, model.nr_transitions))
-            self.stats.report_model_checking(p.property, time.time() - start_mc, not mc_result)
-            if not mc_result:
-                violated.append(p.property)
-                if not check_all:
-                    break
         if self._optimality and len(violated) == 0:
             mc_result = stormpy.model_checking(model, self._optimality.criterion).at(model.initial_states[0])
             if self._optimality.is_improvement(mc_result, self._opt_value):

@@ -149,12 +149,17 @@ class FamilyChecker:
         self.properties = None
         self._properties = None
         self._optimality_setting = None
-        self.first_vp = True
 
         self.qualitative_properties = None
         self._engine = engine
         # keyword that is written to stats files to help restore stats correctly.
         self.stats_keyword = "genericfamilychecker-stats"
+
+    def get_properties(self):
+        return [p for p in self.properties if p is not None]
+
+    def get_all_properties(self):
+        return [p for p in self._properties if p is not None]
 
     def _load_properties_from_file(self, program, path, constant_str=""):
         """
@@ -293,6 +298,8 @@ class FamilyChecker:
                                              add_prerequisites=self._check_prereq
                                              ) for i, p in
                            enumerate(self.properties)]
+        if self._optimality_setting is not None:
+            self.properties.append(None)
         self._properties = self.properties[:]
 
 
@@ -393,8 +400,8 @@ class FamilyChecker:
 
     def input_has_multiple_properties(self):
         if self._optimality_setting is not None:
-            return len(self.properties) > 0
-        return len(self.properties) > 1
+            return len(self.get_properties()) > 0
+        return len(self.get_properties()) > 1
 
     def input_has_optimality_property(self):
         return self._optimality_setting is not None

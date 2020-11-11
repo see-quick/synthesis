@@ -191,7 +191,7 @@ class Synthesiser(FamilyChecker):
     def _initialise_verifier(self):
         dont_care_set = self._compute_dont_care_set()
         self._verifier.initialise(
-            self.sketch, self.properties, self.qualitative_properties, dont_care_set, self._add_cuts
+            self.sketch, self.get_properties(), self.qualitative_properties, dont_care_set, self._add_cuts
         )
         self._verifier.initialise_stats(self.holes)
         self._verifier.initialise_optimality(self._optimality_setting)

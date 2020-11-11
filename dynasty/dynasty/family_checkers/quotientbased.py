@@ -32,7 +32,7 @@ class QuotientBasedFamilyChecker(FamilyChecker):
         self._thresholds = []
         self.__accept_if_above = []
 
-        for p in self._properties:
+        for p in self.get_all_properties():
             formula = p.raw_formula.clone()
             self._thresholds.append(formula.threshold)
             formula.remove_bound()
@@ -145,31 +145,28 @@ class LiftingChecker(QuotientBasedFamilyChecker):
         )
 
     def _add_violation_property(self, violation_property):
-        if self.first_vp:
-            self._properties.append(violation_property)
-        elif len(self._properties):
-            self._properties[len(self._properties) - 1] = violation_property
-        if self.first_vp:
-            self.properties.append(violation_property)
-        elif len(self.properties):
+        self._properties[len(self._properties) - 1] = violation_property
+        if self.properties:
             self.properties[len(self.properties) - 1] = violation_property
+        else:
+            self.properties.append(violation_property)
 
     def _violation_property_update(self, optimal_value, oracle, hole_options_map):
         vp = self._construct_violation_property(optimal_value)
         self._add_violation_property(AnnotatedProperty(vp, self.sketch, False))
         self.initialise()
         oracle.prepare(self.mc_formulae, self.mc_formulae_alt, self._engine)
-        hole_options_map = [(o, f + [True] if self.first_vp else f[:-1] + [True]) for (o, f) in hole_options_map]
+        hole_options_map = [(o, f[:-1] + [True]) for (o, f) in hole_options_map]
         return hole_options_map
 
     @staticmethod
-    def _get_undecided_formulae(undecided_formulae, undecided_indices, add_optimal):
+    def _get_undecided_formulae(undecided_formulae, undecided_indices):
         checked_formula = 0
         for idx, formula in enumerate(undecided_formulae):
             if formula:
                 undecided_formulae[idx] = checked_formula in undecided_indices
                 checked_formula += 1
-        return undecided_formulae + [True] if add_optimal else undecided_formulae
+        return undecided_formulae
 
     @staticmethod
     def _get_new_options(nr_options_remaining, hole_options):
@@ -218,7 +215,7 @@ class LiftingChecker(QuotientBasedFamilyChecker):
                     logger.debug("Undecided.")
                     oracle.scheduler_color_analysis()
                     new_options = self._split_hole_options(hole_options[0], oracle)
-                    undecided_formulae = self._get_undecided_formulae(undecided_formulae, undecided_indices, False)
+                    undecided_formulae = self._get_undecided_formulae(undecided_formulae, undecided_indices)
                     new_options = [(new_option, undecided_formulae) for new_option in new_options]
                     hole_options_map = new_options[:] + hole_options_map[1:]
                 else:
@@ -233,7 +230,6 @@ class LiftingChecker(QuotientBasedFamilyChecker):
                         nr_options_remaining, hole_options_map = \
                             self._get_new_options_map(nr_options_remaining, hole_options_map)
                         hole_options_map = self._violation_property_update(optimal_value, oracle, hole_options_map)
-                        self.first_vp = False if self.first_vp else self.first_vp
                     else:
                         return True, hole_options[0].pick_one_in_family(), None, iterations
 

@@ -26,5 +26,24 @@ CEGAR: unfeasible (471 iters, 977.66 sec, opt: None)
 MAZE/XXL: OPTIMAL SYNTHESIS
     OPTIMAL PROPERTY: P=? [ F "goal" & c < CMAX/2 ]
     CMAX=50; RELATIVE=0.0
-Hybrid: feasible ((80691, 78359) iters, 58276.27 sec, opt: 0.993457367152921)
+!! Hybrid: feasible ((80691, 78359) iters, 58276.27 sec, opt: 0.993457367152921)
 CEGAR: feasible (112261 iters, 20600.45 sec, opt: 0.9934576412200337)
+
+-----------------------------------------------------------------------------------------------------------------------
+MAZE/ORIG: OPTIMAL SYNTHESIS
+    OPTIMAL PROPERTY: P=? [ F s=11 | s=12 ] (minimum)
+    CMAX=50; RELATIVE=0.0
+Hybrid: feasible ((1569, 3944) iters, 1469.48 sec, opt: 0.16127660933531823)
+!! Hybrid: feasible ((1576, 3902) iters, 1524.2 sec, opt: 0.16127660986110395)
+CEGAR: feasible (77 iters, 78.78 sec, opt: 0.16127660933531823)
+    CMAX=2; RELATIVE=0.0
+Hybrid: feasible ((755, 2670) iters, 146.43 sec, opt: 0.16127660926585796); 99999
+Hybrid: feasible ((752, 2518) iters, 166.80 sec, opt: 0.16127660926585796); 1000
+!! Hybrid: feasible ((658, 2473) iters, 129.67 sec, opt: 0.16127653534323458); 99999
+!! Hybrid: feasible ((776, 2108) iters, 143.82 sec, opt: 0.16127505687289184); 500
+!! Hybrid: feasible ((870, 161) iters, 83.16 sec, opt: 0.16127505687289184); 100
+!! Hybrid: feasible ((1316, 15) iters, 99.51 sec, opt: 0.16127505687289184); 5
+CEGAR: feasible (43 iters, 1.78 sec, opt: 0.16127660926585796)
+    CMAX=2; RELATIVE=0.02
+Hybrid: feasible ((136, 17) iters, 9.16 sec, opt: 0.16253492497569014)
+

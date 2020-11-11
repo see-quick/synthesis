@@ -1,6 +1,7 @@
 # author: Roman Andriushchenko
 # co-author: Simon Stupinsky
 import logging
+import math
 import time
 import z3
 
@@ -105,7 +106,7 @@ class CEGARChecker(LiftingChecker):
         self.statistic = Statistic("CEGAR")
         self.iterations = 0
         self.optimal_iterations = 0
-        self.optimal_value = 0.0
+        self.optimal_value = None
         self.use_oracle = True
         self.new_options = None
         self.satisfying_assignment = None
@@ -113,9 +114,13 @@ class CEGARChecker(LiftingChecker):
         self.optimal_option = None
 
     def cegar_initialisation(self):
+        self.optimal_value = (0.0 if self._optimality_setting.direction == "max" else math.inf) if self._optimality_setting is not None else None
         self.jani_quotient_builder = JaniQuotientBuilder(self.sketch, self.holes)
         self._open_constants = self.holes
-        return [(self.hole_options, [True] * len(self.mc_formulae))]
+        return [(
+            self.hole_options,
+            [True] * len(self.mc_formulae) + ([False] if self._optimality_setting is not None else [])
+        )]
 
     def cegar_split_option(self, option, index=0):
         self.oracle.scheduler_color_analysis(index)
@@ -147,7 +152,6 @@ class CEGARChecker(LiftingChecker):
 
         threshold_synthesis_results = self.oracle.decided(self.thresholds)
 
-        optimal_iter = False
         if self._contains_unsat_result(threshold_synthesis_results):
             logger.debug("Unsatisfying.")
         else:
@@ -168,15 +172,13 @@ class CEGARChecker(LiftingChecker):
                         hole_options_map = self._violation_property_update(
                             self.optimal_value, self.oracle, hole_options_map
                         )
-                        # TODO: check it and append to CEGAR
+                        undecided_indices.append(len(undecided_formulae) - 1)
                         self.oracle.latest_results.append(latest_result)
-                        optimal_iter = True and self.first_vp
-                        self.first_vp = False if self.first_vp else self.first_vp
                 else:
                     logger.debug("Satisfying.")
                     self.satisfying_assignment = option.pick_one_in_family()
 
-        return self._get_undecided_formulae(undecided_formulae, undecided_indices, optimal_iter), hole_options_map
+        return self._get_undecided_formulae(undecided_formulae, undecided_indices), hole_options_map
 
     def perform_iteration(self, hole_options_map):
         undecided_formulae, hole_options_map = self.cegar_analyse_option(hole_options_map)
@@ -473,17 +475,14 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
             self.sketch, relevant_holes_flatset, vp.raw_formula, analyse_result.mdp_handling.mdp, mdp_result
         )
 
-    def _update_problems(self, problems, problem, formulae):
+    def _update_problems(self, problems, problem):
         hole_options_map = [(o, f) for (o, f, _, _) in problems]
         hole_options_map = self._violation_property_update(
             self.optimal_value, self.oracle, hole_options_map
         )
         assert len(hole_options_map) == len(problems)
         problems = [(o, f, b, s) for (o, f), (_, _, b, s) in zip(hole_options_map, problems)]
-        if len(formulae) == len(self._properties) and len(problem[1]) > 0:
-            problem[1][-1] = True
-        else:
-            problem[1].append(True)
+        problem[1][-1] = True
         return problems, problem
 
     def _prepare_properties(self, mdp_results, formulae):
@@ -528,7 +527,7 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         relevant_holes_flatset = stormpy.core.FlatSetString()
         [relevant_holes_flatset.insert(hole) for hole in relevant_holes]
         counterexamples = []
-        for idx, (prop, mdp_result) in enumerate(zip(self.properties, mdp_results)):
+        for idx, (prop, mdp_result) in enumerate(zip(self.get_properties(), mdp_results)):
             counterexamples.append(stormpy.SynthesisResearchCounterexample(
                 self.sketch, relevant_holes_flatset, prop.raw_formula, mdp, mdp_result
             ))
@@ -537,6 +536,8 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
                 self.counterexamples_global.append(stormpy.SynthesisResearchCounterexample(
                     self.sketch, relevant_holes_flatset, prop.raw_formula, self.global_mdp, self.global_mdp_results[idx]
                 ))
+        if self._optimality_setting is not None:
+            counterexamples.append(None)
 
         # get satisfiable assignments (withing the subfamily)
         solver_result = self.solver.check(family_encoding)
@@ -557,11 +558,29 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
             assert dtmc.labeling.get_states("deadlock").number_of_set_bits() == 0
 
             logger.debug("Constructed DTMC of size {}.".format(dtmc.nr_states))
+
+            # cols = []
+            # vals = []
+            # r_size = []
+            # for i in range(0, dtmc.transition_matrix.nr_rows):
+            #     cnt = 0
+            #     row = dtmc.transition_matrix.get_row(i)
+            #     for r in row:
+            #         cnt += 1
+            #         cols.append(r.column)
+            #         vals.append(r.value())
+            #     r_size.append(cnt)
+            # print(f">>> {cols}")
+            # print(f">>> {vals}")
+            # print(f">>> {r_size}")
+            # print(f">>> {len(vals)}")
+            # exit(1)
+
             assert len(dtmc.initial_states) == 1  # to avoid ambiguity
             assert dtmc.initial_states[0] == 0  # should be implied by topological ordering
 
             satisfied = []
-            for index, prop in enumerate(self.properties):
+            for index, prop in enumerate(self.get_properties()):
                 dtmc_sat, dtmc_result = check_model(dtmc, prop, quantitative=True)
                 satisfied.append(dtmc_sat)
                 if not dtmc_sat:
@@ -587,12 +606,13 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
                         logger.debug("Optimal value improved to {}.".format(dtmc_result.at(dtmc.initial_states[0])))
                         self.optimal_value = dtmc_result.at(dtmc.initial_states[0])
                         self.optimal_option = hole_assignments
-                        problems, problem = self._update_problems(problems, problem, formulae)
-                        self.first_vp = False if self.first_vp else self.first_vp
-                        counterexamples.append(self._construct_violation_cex(family, relevant_holes_flatset))
+                        problems, problem = self._update_problems(problems, problem)
+                        counterexamples[len(counterexamples) - 1] = \
+                            self._construct_violation_cex(family, relevant_holes_flatset)
                     else:
                         logger.debug("Optimal value ({}) not improved, conflict analysis!".format(self.optimal_value))
-                        counterexamples.append(self._construct_violation_cex(family, relevant_holes_flatset))
+                        counterexamples[len(counterexamples) - 1] = \
+                            self._construct_violation_cex(family, relevant_holes_flatset)
                         self._construct_cex_for_index(
                             counterexamples, dtmc, family_clauses, sat_model, len(counterexamples) - 1
                         )
@@ -628,7 +648,7 @@ class IntegratedChecker(CEGISChecker, CEGARChecker):
         logger.info("Running feasibility synthesis.")
 
         # precompute DTMC builder options
-        raw_formulae = [p.property.raw_formula for p in self.properties]
+        raw_formulae = [p.property.raw_formula for p in self.get_properties()]
         if self.input_has_optimality_property():
             raw_formulae.append(self._optimality_setting.criterion.raw_formula)
         builder_options = stormpy.BuilderOptions(raw_formulae)
