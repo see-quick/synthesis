@@ -1,9 +1,19 @@
 dtmc
 
-const int x3;
-const int x4;
-const int x5;
-const int x6;
+const int x1_1;
+const int x1_2;
+const int x1_3;
+const int x2_1;
+const int x2_2;
+const int x2_3;
+const int x3_1;
+const int x3_2;
+const int x4_1;
+const int x4_2;
+const int x5_1;
+const int x5_2;
+const int x6_1;
+const int x6_2;
 
 module die
         // local state
@@ -11,13 +21,13 @@ module die
         // value of the dice
         d : [0..6] init 0;
 
-        [] s=0 -> 0.5 : (s'=1) + 0.5 : (s'=2);
-        [] s=1 -> 0.5 : (s'=x3) + 0.5 : (s'=x4);
-        [] s=2 -> 0.5 : (s'=x5) + 0.5 : (s'=x6);
-        [] s=3 -> 0.5 : (s'=1) + 0.5 : (s'=7) & (d'=1);
-        [] s=4 -> 0.5 : (s'=7) & (d'=3) + 0.5 : (s'=7) & (d'=2);
-        [] s=5 -> 0.5 : (s'=2) + 0.5 : (s'=7) & (d'=4);
-        [] s=6 -> 0.5 : (s'=7) & (d'=6) + 0.5 : (s'=7) & (d'=5);
+        [] s=0 -> 0.5 : (s'=x1_1) + 0.5 : (s'=x2_1);
+        [] s=1 -> 0.5 : (s'=x3_1) + 0.5 : (s'=x4_1);
+        [] s=2 -> 0.5 : (s'=x5_1) + 0.5 : (s'=x6_1);
+        [] s=3 -> 0.5 : (s'=x1_2) + 0.5 : (s'=7) & (d'=x1_3);
+        [] s=4 -> 0.5 : (s'=7) & (d'=x3_2) + 0.5 : (s'=7) & (d'=x2_2);
+        [] s=5 -> 0.5 : (s'=x2_3) + 0.5 : (s'=7) & (d'=x4_2);
+        [] s=6 -> 0.5 : (s'=7) & (d'=x6_2) + 0.5 : (s'=7) & (d'=x5_2);
         [] s=7 -> 1: (s'=7);
 endmodule
 

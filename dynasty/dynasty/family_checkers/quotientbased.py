@@ -215,7 +215,8 @@ class LiftingChecker(QuotientBasedFamilyChecker):
                     logger.debug("Undecided.")
                     oracle.scheduler_color_analysis()
                     new_options = self._split_hole_options(hole_options[0], oracle)
-                    undecided_formulae = self._get_undecided_formulae(undecided_formulae, undecided_indices)
+                    # undecided_formulae = self._get_undecided_formulae(undecided_formulae, undecided_indices)
+                    undecided_formulae = undecided_formulae
                     new_options = [(new_option, undecided_formulae) for new_option in new_options]
                     hole_options_map = new_options[:] + hole_options_map[1:]
                 else:

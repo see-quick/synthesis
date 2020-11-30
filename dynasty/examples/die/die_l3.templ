@@ -1,0 +1,42 @@
+dtmc
+
+const int x0;
+const int x1;
+const int x2;
+const int x3;
+const int x4;
+const int x5;
+const int x6;
+const int x0;
+
+const int d0;
+const int d1;
+const int d2;
+const int d3;
+const int d4;
+const int d5;
+const int d6;
+const int d7;
+
+module die
+        // local state
+        s : [0..7] init 0;
+        // value of the dice
+        d : [0..6] init 0;
+
+        [] s=0 -> 0.5 : (s'=1) + 0.5 : (s'=2);
+        [] s=1 -> 0.5 : (s'=3) + 0.5 : (s'=4);
+        [] s=2 -> 0.5 : (s'=5) + 0.5 : (s'=6);
+
+        [] s=3 -> 0.5 : (s'=x0) & (d'=d0) + 0.5 : (s'=x1) & (d'=d1);
+        [] s=4 -> 0.5 : (s'=x2) & (d'=d2) + 0.5 : (s'=x3) & (d'=d3);
+        [] s=5 -> 0.5 : (s'=x4) & (d'=d4) + 0.5 : (s'=x5) & (d'=d5);
+        [] s=6 -> 0.5 : (s'=x6) & (d'=d6) + 0.5 : (s'=x7) & (d'=d7);
+
+        [] s=7 -> 1 : (s'=7);
+endmodule
+
+rewards "steps"
+    true : 1;
+endrewards
+

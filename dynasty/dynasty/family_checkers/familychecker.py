@@ -77,7 +77,6 @@ class OptimalitySetting:
             return mc_result > best_so_far
 
     def get_violation_property(self, best_so_far, bound_translator):
-        print(f"> epsilon: = {self._eps}")
         vp = stormpy.Property(
             "optimality_violation",
             self._criterion.raw_formula.clone(),

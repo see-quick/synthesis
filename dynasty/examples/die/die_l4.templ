@@ -1,0 +1,66 @@
+dtmc
+
+const int x0;
+const int x1;
+const int x2;
+const int x3;
+const int x4;
+const int x5;
+const int x6;
+const int x7;
+const int x8;
+const int x9;
+const int x10;
+const int x11;
+const int x12;
+const int x13;
+const int x14;
+const int x15;
+
+const int d0;
+const int d1;
+const int d2;
+const int d3;
+const int d4;
+const int d5;
+const int d6;
+const int d7;
+const int d8;
+const int d9;
+const int d10;
+const int d11;
+const int d12;
+const int d13;
+const int d14;
+const int d15;
+
+module die
+        // local state
+        s : [0..15] init 0;
+        // value of the dice
+        d : [0..6] init 0;
+
+        [] s=0 -> 0.5 : (s'=1) + 0.5 : (s'=2);
+        [] s=1 -> 0.5 : (s'=3) + 0.5 : (s'=4);
+        [] s=2 -> 0.5 : (s'=5) + 0.5 : (s'=6);
+        [] s=3 -> 0.5 : (s'=7) + 0.5 : (s'=8);
+        [] s=4 -> 0.5 : (s'=9) + 0.5 : (s'=10);
+        [] s=5 -> 0.5 : (s'=11) + 0.5 : (s'=12);
+        [] s=6 -> 0.5 : (s'=13) + 0.5 : (s'=14);
+
+        [] s=7 -> 0.5 : (s'=x0) & (d'=d0) + 0.5 : (s'=x1) & (d'=d1);
+        [] s=8 -> 0.5 : (s'=x2) & (d'=d2) + 0.5 : (s'=x3) & (d'=d3);
+        [] s=9 -> 0.5 : (s'=x4) & (d'=d4) + 0.5 : (s'=x5) & (d'=d5);
+        [] s=10 -> 0.5 : (s'=x6) & (d'=d6) + 0.5 : (s'=x7) & (d'=d7);
+        [] s=11 -> 0.5 : (s'=x8) & (d'=d8) + 0.5 : (s'=x9) & (d'=d9);
+        [] s=12 -> 0.5 : (s'=x10) & (d'=d10) + 0.5 : (s'=x11) & (d'=d11);
+        [] s=13 -> 0.5 : (s'=x12) & (d'=d12) + 0.5 : (s'=x13) & (d'=d13);
+        [] s=14 -> 0.5 : (s'=x14) & (d'=d14) + 0.5 : (s'=x15) & (d'=d15);
+
+        [] s=15 -> 1: (s'=15);
+endmodule
+
+rewards "steps"
+    true : 1;
+endrewards
+
