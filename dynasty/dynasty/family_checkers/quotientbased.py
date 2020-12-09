@@ -231,8 +231,6 @@ class LiftingChecker(QuotientBasedFamilyChecker):
                         nr_options_remaining, hole_options_map = \
                             self._get_new_options_map(nr_options_remaining, hole_options_map)
                         hole_options_map = self._violation_property_update(optimal_value, oracle, hole_options_map)
-                        print("Hello world")
-                        exit(1)
                     else:
                         return True, hole_options[0].pick_one_in_family(), None, iterations
 
