@@ -185,7 +185,7 @@ class LiftingChecker(QuotientBasedFamilyChecker):
 
         oracle, optimal_hole_option = None, None
         iterations, optimal_iterations = 0, 0
-        optimal_value = 0.0
+        optimal_value = 0.0 if self._optimality_setting.direction == "max" else 99999
         hole_options_next_round = []
         sat = False
 
@@ -231,6 +231,8 @@ class LiftingChecker(QuotientBasedFamilyChecker):
                         nr_options_remaining, hole_options_map = \
                             self._get_new_options_map(nr_options_remaining, hole_options_map)
                         hole_options_map = self._violation_property_update(optimal_value, oracle, hole_options_map)
+                        print("Hello world")
+                        exit(1)
                     else:
                         return True, hole_options[0].pick_one_in_family(), None, iterations
 
